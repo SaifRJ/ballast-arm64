@@ -1,2 +1,10 @@
-# arm-llm-memory-optimisation-2026
-Benchmarking and optimising LLM memory usage on Arm Graviton for the Arm Create Hackathon 2026
+**PROJECT THESIS**
+Benchmarking and optimising LLM memory usage on Arm Graviton (Arm Create Hackathon 2026)
+
+**Benchmarking Methodology**
+
+**Optimisation Methodology**
+
+**Setup & Reproducing Results**
+
+**Findings & Limitations**
