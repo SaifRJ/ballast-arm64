@@ -6,3 +6,4 @@ raw_*.txt
 __pycache__/
 *.pyc
 *.pem
+notes.md
