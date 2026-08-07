@@ -1,11 +1,54 @@
-**Project Thesis**
+# ** Project Thesis **
 
-Benchmarking and optimising LLM memory usage on Arm Graviton (Arm Create Hackathon 2026)
+This is a solo-developer project which benchmarks the RAM utilisation of various LLMs on Arm64 Graviton, with the goal of evaluating and improving performance metrics using KV-cache quantization and Arm-specific build flags in llama.cpp. 
 
-**Benchmarking Methodology**
+This project aims to have three core delivarables:
 
-**Optimisation Methodology**
+1. A standardised testing tool (benchmark.py) that tests, measures, and records LLM performance on Arm64 chips using built-in llama.cpp functions. This tool is used to measure how effective the chosen optimisation measures implemented are on each model.  
+2. KV-Cache quanitisation to halve the amount of RAM used whilst minimally affecting output quality.
+3. Arm-specific build flags to optimise llama.cpp functions on Arm64 chips
 
-**Setup & Reproducing Results**
+All delivarables are designed as a 'harness' meant to be dropped directly into an instance with llama.cpp and executed for ease of use.
 
-**Findings & Limitations**
+Environment Specs:
+Arm64 Graviton (EC2 Instance), 8 vCPU Cores, 60GB of Storage, 16GB RAM
+
+## ** Benchmarking Methodology **
+
+A select group of four LLMs were asked the same 5 prompts of varying length (prompts equivalent to 10, 200, 1000, 4000, 8000 tokens) to observe how fuller context windows affect specific performance metrics. 
+
+The metrics measured and recorded were:
+- Peak RAM utilisation (KB, mean & median across repeats, from /usr/bin/time)
+- RAM utilisation (mean & median across repeats, sampled RSS during the run)
+- Prompt-processing speed (prefill, from llama-bench)
+- Time-to-first-token (ms, from llama-bench)
+- Token generation speed (tokens/sec, from llama-bench)
+- Perplexity (one value per config, from llama-perplexity)
+- Thread-scaling 
+
+LLM models tested:
+- Gemma 3 4B (Google)
+- Qwen3 4B (Alibaba)
+- Llama 3.2 3B (Meta)
+- Phi-4-mini 3.8B (Microsoft)
+**Note: any LLMs that are llama.cpp compatible and in a GGUF file format can be used!**
+
+Prompts used:
+- Found in 'eval/prompts' folder, contains prompts ranging from just ~7 tokens to ~8000 tokens to observe how varying context window sizes affect specific metrics
+
+## ** Optimisation Methodology **
+
+## ** Optimisation Achieved **
+
+## ** Setup & Reproducing Results **
+
+## ** Findings & Limitations **
+
+Findings:
+- 
+
+Limitations:
+- Due to the nature of this project mostly being on a Cloud VM, measuring power-draw efficiency and optimisation was unfortunately not plausible
+- Optimising model size on disk was not accounted for, and is not the goal of this project
+
+## ** Additional Resources **
