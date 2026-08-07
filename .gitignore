@@ -1,0 +1,8 @@
+*.gguf
+models/
+llama.cpp/
+build/
+raw_*.txt
+__pycache__/
+*.pyc
+*.pem
