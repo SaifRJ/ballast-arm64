@@ -2,7 +2,7 @@
 
 This is a solo-developer project which benchmarks the RAM utilisation of various LLMs on Arm64 Graviton, with the goal of evaluating and improving performance metrics using KV-cache quantisation and Arm-specific build flags in llama.cpp. 
 
-This project aims to have three core delivarables:
+This project aims to have three core deliverables:
 
 1. A standardised benchmarking pipeline (benchmark.py) that tests, measures, and records LLM performance on Arm64 chips using custom and built-in llama.cpp functions. This tool is used to measure how effective the implemented optimisations are on each model.  
 2. KV-Cache quantisation to halve the amount of RAM used whilst minimally affecting output quality.
