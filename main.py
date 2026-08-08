@@ -5,12 +5,13 @@ import benchmark as bm
 # All functions live in benchmark.py, main.py only decides what runs and in what order
 
 # Run config
-PROMPTS = ["short", "medium", "long", "very_long", "extra_long"]
-REPEATS = 10
+PROMPTS = ["short", "medium", "long", "very_long"]
+REPEATS = 3
 CONTEXT_SIZE = 8192
 GENERATED_TOKENS = 100
 CONFIG_TAG = "baseline"
 INSTANCE = "c7g.2xlarge"
+START_TIME = bm.run_time()
 
 def main():
 
@@ -29,7 +30,7 @@ def main():
         "timestamp", "config", "instance", "model", "prompt-tier",
         "ctx", "threads", "gen_tokens", "repeat",
         "peak_ram_mb", "cpu_pct"]
-    run_id = bm.new_run_id()
+    run_id = (bm.run_time()).strftime("%Y%m%dT%H%M%S")
     results_csv = bm.ensure_results_csv(run_id, CSV_FIELDS)
 
     # Core loop: return performance metrics of every baseline/optimised model x every prompt length x repeated N times for statistical accuracy
@@ -59,7 +60,7 @@ def main():
  
                 # assemble one row and append it
                 bm.append_row(results_csv, CSV_FIELDS, {
-                    "timestamp": bm.timestamp_now(),
+                    "timestamp": (bm.run_time()).strftime("%Y-%m-%dT%H:%M:%S"),
                     "config": CONFIG_TAG,
                     "instance": INSTANCE,
                     "model": model_name,
@@ -79,6 +80,7 @@ def main():
     # bm.generate_report(run_id)
 
     print(f"\n> PROCESS COMPLETE. \n> Results in results/benchmark_{run_id}/ ")
+    print(f"\n> Run time: {bm.run_time() - START_TIME}")
 
 if __name__ == "__main__":
     main()
