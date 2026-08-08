@@ -13,7 +13,7 @@ import re
 
 # Paths
 repo_root = Path(__file__).resolve().parent
-binaries_dir = repo_root / "build" / "bin"
+binaries_dir = repo_root / "llama.cpp" / "build" / "bin"
 prompts_dir = repo_root / "eval" / "prompts"
 perplexity_dir = repo_root / "eval" / "perplexity"
 results_dir = repo_root / "results"
