@@ -39,11 +39,13 @@ def main():
 
             # Resolve the prompt file for this tier; skip cleanly if missing.
             prompt_file = bm.prompts_dir / f"{prompt}.txt"
+
             if not prompt_file.exists():
                 print(f"\n> SKIP prompt '{prompt}' (missing {prompt_file})")
                 continue
  
             for repeat_number in range(1, REPEATS + 1):
+
                 print(f"\n> [{model_name} / {prompt}] repeat {repeat_number}/{REPEATS}")
  
                 # RAM + CPU from one /usr/bin/time-wrapped llama-cli run
