@@ -80,7 +80,7 @@ def main():
     # bm.generate_report(run_id)
 
     print(f"\n> PROCESS COMPLETE. \n> Results in results/benchmark_{run_id}/ ")
-    print(f"\n> Run time: {bm.run_time() - START_TIME}")
+    print(f"\n> Run time: {str(bm.run_time() - START_TIME).split('.')[0]}")
 
 if __name__ == "__main__":
     main()
