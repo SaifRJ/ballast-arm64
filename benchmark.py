@@ -19,6 +19,9 @@ perplexity_dir = repo_root / "eval" / "perplexity"
 results_dir = repo_root / "results"
 models_txt = repo_root / "models.txt"
 
+def run_time():
+    return datetime.now().astimezone()
+
 def load_models():
 
     if not models_txt.exists():
@@ -68,11 +71,6 @@ def get_binary(binary_name):
 def get_thread_count():
     return os.cpu_count()
 
-
-def new_run_id():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-
-
 def ensure_results_csv(run_id, csv_fields):
 
     run_folder = results_dir / f"benchmark_{run_id}"
@@ -89,7 +87,6 @@ def ensure_results_csv(run_id, csv_fields):
 def download_models(models):
 
     # 'models' is a list of (model_name, model_repo) tuples, where model_repo is a Hugging Face identifier (for example, "ggml-org/gemma-3-4b-it-GGUF:Q4_K_M")
-    # NOTE: requires llama.cpp built with SSL/CURL support
 
     llama_cli = get_binary("llama-cli")
     available = []
@@ -116,10 +113,6 @@ def download_models(models):
                   f"\n> Is llama.cpp built with SSL support?")
 
     return available
-
-
-def timestamp_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def append_row(csv_path, csv_fields, row_values):
