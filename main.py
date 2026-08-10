@@ -13,52 +13,55 @@ CONFIG_TAG = "baseline"
 INSTANCE = "c7g.2xlarge"
 START_TIME = bm.run_time()
 
+# CSV output config setup
+CSV_FIELDS = [
+    "timestamp", "config", "instance", "model", "prompt-tier",
+    "ctx", "threads", "gen_tokens", "repeat", "peak_ram_mb", 
+    "cpu_pct", "prefill_tps", "prefill_tps_stddev", "gen_tps",
+    "gen_tps_stddev", "ttft_ms"]
+run_id = (bm.run_time()).strftime("%Y%m%dT%H%M%S")
+
 def main():
 
-    # Load the list of models we want to benchmark from models.txt
+    # Read the list of model entries in models.txt 
     models = bm.load_models()
 
-    # Download the models from Hugging Face and cache them locally; returns a list of (model_name, model_repo) tuples for successful downloads
-    print(f"\n> Retrieving available models from Hugging Face and caching them locally...")
+    # Download models or use existing models if specified 
     available_models = bm.download_models(models)
     
     # Detect available CPU cores for thread count measurements
     thread_count = bm.get_thread_count()
 
-    # CSV output setup
-    CSV_FIELDS = [
-        "timestamp", "config", "instance", "model", "prompt-tier",
-        "ctx", "threads", "gen_tokens", "repeat",
-        "peak_ram_mb", "cpu_pct"]
-    run_id = (bm.run_time()).strftime("%Y%m%dT%H%M%S")
+    # Create results.csv folder to store benchmark outputs
     results_csv = bm.ensure_results_csv(run_id, CSV_FIELDS)
 
-    # Core loop: return performance metrics of every baseline/optimised model x every prompt length x repeated N times for statistical accuracy
-    for model_name, model_repo in available_models:
+    # Main loop returns performance metrics of every baseline/optimised model x every prompt x repeated N times to ensure statistical accuracy
+    for model_name, model_source in available_models:
 
         for prompt in PROMPTS:
 
-            # Resolve the prompt file for this tier; skip cleanly if missing.
+            # Locate prompt file
             prompt_file = bm.prompts_dir / f"{prompt}.txt"
 
             if not prompt_file.exists():
-                print(f"\n> SKIP prompt '{prompt}' (missing {prompt_file})")
+                print(f"\n> ERROR: Unable to read prompt '{prompt}' (file missing: {prompt_file}). Prompt will be skipped.")
+                print("-> Please ensure the prompt file exists and matches the name of the main.py list")
                 continue
+
+            # Returns the number of tokens in the prompt file based on approx. 0.75 word/token ratio
+            prompt_tokens = bm.count_tokens(prompt_file)
  
             for repeat_number in range(1, REPEATS + 1):
 
-                print(f"\n> [{model_name} / {prompt}] repeat {repeat_number}/{REPEATS}")
+                print(f"\n> {model_name} / {prompt}: repeat {repeat_number}/{REPEATS}")
  
-                # RAM + CPU from one /usr/bin/time-wrapped llama-cli run
-                peak_ram_mb, cpu_percent = bm.measure_ram_cpu(
-                    model_repo,
-                    prompt_file,
-                    CONTEXT_SIZE,
-                    GENERATED_TOKENS,
-                    thread_count,
-                )
+                # Returns Peak RAM and CPU% for this model/prompt/repeat combination
+                peak_ram_mb, cpu_percent = bm.measure_ram_cpu(model_source, prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count)
+
+                # Returns prompt-processing speed and token generation speed
+                metrics = bm.measure_bench_metrics(model_source, prompt_tokens, GENERATED_TOKENS, thread_count)
  
-                # assemble one row and append it
+                # Assemble CSV row and append values
                 bm.append_row(results_csv, CSV_FIELDS, {
                     "timestamp": (bm.run_time()).strftime("%Y-%m-%dT%H:%M:%S"),
                     "config": CONFIG_TAG,
@@ -71,6 +74,11 @@ def main():
                     "repeat": repeat_number,
                     "peak_ram_mb": peak_ram_mb if peak_ram_mb is not None else "NA",
                     "cpu_pct": cpu_percent if cpu_percent is not None else "NA",
+                    "prefill_tps": metrics.get("prefill_tps", "NA"),
+                    "prefill_tps_stddev": metrics.get("prefill_tps_stddev", "NA"),
+                    "gen_tps": metrics.get("gen_tps", "NA"),
+                    "gen_tps_stddev": metrics.get("gen_tps_stddev", "NA"),
+                    "ttft_ms": metrics.get("ttft_ms", "NA")
                 })
 
     # group by (config, model, prompt), mean/median across repeats
