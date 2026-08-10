@@ -129,7 +129,7 @@ def count_tokens(prompt_file):
 
 def ensure_results_csv(run_id, csv_fields):
 
-    run_folder = results_dir / f"benchmark_{run_id}"
+    run_folder = results_dir / f"Benchmark_{run_id}"
     run_folder.mkdir(parents=True, exist_ok=True)
 
     results_csv = run_folder / "results.csv"

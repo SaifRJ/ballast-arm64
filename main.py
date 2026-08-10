@@ -6,7 +6,7 @@ import benchmark as bm
 
 # Run config
 PROMPTS = ["short", "medium", "long", "very_long"]
-REPEATS = 3
+REPEATS = 1
 CONTEXT_SIZE = 8192
 GENERATED_TOKENS = 100
 CONFIG_TAG = "baseline"
@@ -19,7 +19,7 @@ CSV_FIELDS = [
     "ctx", "threads", "gen_tokens", "repeat", "peak_ram_mb", 
     "cpu_pct", "prefill_tps", "prefill_tps_stddev", "gen_tps",
     "gen_tps_stddev", "ttft_ms"]
-run_id = (bm.run_time()).strftime("%Y%m%dT%H%M%S")
+run_id = (bm.run_time()).strftime("%Y-%m-%d_%H-%M")
 
 def main():
 

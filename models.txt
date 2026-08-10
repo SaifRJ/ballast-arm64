@@ -1,6 +1,7 @@
 # Every valid entry must contain a model_name (can be anything) and the source separated by a comma.
 # The source is either a direct .gguf download URL, or a local filepath if you already have an existing .gguf file
 # If you manually deposit a .gguf file, the file name MUST match the model name you specify 
+# Format: model_name, my-model-url-or-filepath
 
 Gemma-3, https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
 Qwen-3, https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
