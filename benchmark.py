@@ -1,11 +1,14 @@
 from pathlib import Path
 from datetime import datetime
+import time
 import subprocess
 import tempfile
 import shutil
 import csv
 import os
 import re
+import zipfile
+import psutil 
 
 # benchmark.py: containds all logic for the Arm64 LLM benchmark harness
 # This file holds every worker function that returns a performance metric, file path helpers, or CSV outputs
@@ -145,7 +148,7 @@ def append_row(csv_path, csv_fields, row_values):
         csv.writer(csv_file).writerow([row_values.get(field, "NA") for field in csv_fields])
 
 
-def measure_ram_cpu(model_source, prompt_file, context_size, generated_tokens, thread_count):
+def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thread_count):
 
     llama_cli = get_binary("llama-cli")
 
@@ -155,7 +158,7 @@ def measure_ram_cpu(model_source, prompt_file, context_size, generated_tokens, t
     command = [
         "/usr/bin/time", "-v",
         llama_cli,
-        "-m", str(model_source),
+        "-m", str(model_path),
         "-f", str(prompt_file),
         "-c", str(context_size),
         "-n", str(generated_tokens),
@@ -163,11 +166,29 @@ def measure_ram_cpu(model_source, prompt_file, context_size, generated_tokens, t
         "--no-conversation", "--single-turn",
     ]
 
+    rss_samples = []
     try:
         with open(os.devnull, "w") as discard, open(time_report_path, "w") as report:
-            subprocess.run(command, stdout=discard, stderr=report, check=False)
-        time_report = Path(time_report_path).read_text()
+            proc = subprocess.Popen(command, stdout=discard, stderr=report)
 
+            # poll memory usage for average RAM 
+            try:
+                parent = psutil.Process(proc.pid)
+                while proc.poll() is None:
+                    try:
+                        rss = parent.memory_info().rss
+                        for c in parent.children(recursive=True):
+                            rss += c.memory_info().rss
+                        rss_samples.append(rss)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        break
+                    time.sleep(0.1)
+            except psutil.NoSuchProcess:
+                pass
+
+            proc.wait()
+
+        time_report = Path(time_report_path).read_text()
     finally:
         try:
             os.unlink(time_report_path)
@@ -182,8 +203,9 @@ def measure_ram_cpu(model_source, prompt_file, context_size, generated_tokens, t
     # convert kb to megabytes
     peak_ram_mb = int(peak_ram_match.group(1)) // 1024 if peak_ram_match else None
     cpu_percent = int(cpu_percent_match.group(1)) if cpu_percent_match else None
+    avg_ram_mb = (int(sum(rss_samples) / len(rss_samples)) // (1024 * 1024)) if rss_samples else None
 
-    return peak_ram_mb, cpu_percent
+    return peak_ram_mb, cpu_percent, avg_ram_mb
 
 
 def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_count):
@@ -230,3 +252,53 @@ def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_co
             metrics["gen_tps_stddev"] = float(row["stddev_ts"])
  
     return metrics
+
+def install_perplexity_corpus():
+
+    perplexity_dir.mkdir(parents=True, exist_ok=True)
+    wikitext_file = perplexity_dir / "wiki.test.raw"
+
+    if wikitext_file.exists():
+        return wikitext_file
+
+    url = "https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip"
+    zip_path = perplexity_dir / "wikitext-2-raw-v1.zip"
+
+    print("\n> Fetching perplexity corpus (wikitext-2-raw)...")
+    try:
+        subprocess.run(["wget", "-q", "--show-progress", "-O", str(zip_path), url], check=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            member = next(n for n in zf.namelist() if n.endswith("wiki.test.raw"))
+            with zf.open(member) as src, open(perplexity_dir / "wiki.test.raw", "wb") as dst:
+                dst.write(src.read())
+
+    except (subprocess.CalledProcessError, zipfile.BadZipFile, StopIteration, OSError) as e:
+        print(f"\n> ERROR: Failed to fetch/extract wikitext corpus (perplexity will be skipped) [{e}]")
+        return None
+
+    return wikitext_file if wikitext_file.exists() else None
+
+
+def measure_perplexity(model_path, chunk_count):
+
+    llama_perplexity = get_binary("llama-perplexity")
+
+    wikitext_file = perplexity_dir / "wiki.test.raw" 
+
+    if not wikitext_file.exists():
+        print(f"\n> ERROR: Perplexity corpus not found at {wikitext_file}.")
+        return None
+
+    command = [
+        llama_perplexity,
+        "-m", str(model_path),
+        "-f", str(wikitext_file),
+        "--chunks", str(chunk_count),
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    matches = re.findall(r"PPL\s*=\s*([\d.]+)", result.stderr) or re.findall(r"PPL\s*=\s*([\d.]+)", result.stdout)
+
+    return float(matches[-1]) if matches else None
+
