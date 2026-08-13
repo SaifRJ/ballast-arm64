@@ -317,7 +317,7 @@ def get_thread_list(THREAD_CAP):
     return thread_pairs
 
 
-def measure_thread_scaling(model_path, prompt_tokens, thread_counts):
+def measure_thread_scaling(model_path, prompt_tokens, thread_pairs):
 
     llama_bench = get_binary("llama-bench")
 
@@ -326,7 +326,7 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_counts):
         "-m", str(model_path),
         "-p", str(prompt_tokens),
         "-n", "0",
-        "-t", ",".join(str(t) for t in thread_counts),
+        "-t", ",".join(str(t) for t in thread_pairs),
         "-o", "csv",
     ]
 

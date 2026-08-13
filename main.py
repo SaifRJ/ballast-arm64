@@ -80,7 +80,7 @@ def main():
             prompt_tokens = bm.count_tokens(prompt_file)
 
             # Measure thread throughput per model per prompt
-            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_list)
+            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_pairs)
                 
             for threads, tps in scaling:
                 bm.append_row(thread_scaling_csv, THREAD_FIELDS, {
