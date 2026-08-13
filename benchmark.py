@@ -130,17 +130,16 @@ def count_tokens(prompt_file):
     return max(1, round(word_count / 0.75))
 
 
-def ensure_results_csv(run_id, csv_fields):
+def ensure_csv(run_id, csv_fields, filename):
 
     run_folder = results_dir / f"Benchmark_{run_id}"
     run_folder.mkdir(parents=True, exist_ok=True)
+    csv_path = run_folder / filename
 
-    results_csv = run_folder / "results.csv"
-
-    with open(results_csv, "w", newline="") as csv_file:
+    with open(csv_path, "w", newline="") as csv_file:
         csv.writer(csv_file).writerow(csv_fields)
 
-    return results_csv
+    return csv_path
 
 def append_row(csv_path, csv_fields, row_values):
 
@@ -301,4 +300,51 @@ def measure_perplexity(model_path, chunk_count):
     matches = re.findall(r"PPL\s*=\s*([\d.]+)", result.stderr) or re.findall(r"PPL\s*=\s*([\d.]+)", result.stdout)
 
     return float(matches[-1]) if matches else None
+
+
+def get_thread_list(THREAD_CAP):
+    max_threads = min(os.cpu_count() or 1, THREAD_CAP)
+    thread_pairs = []
+    t = 1
+
+    while t < max_threads:
+        thread_pairs.append(t)
+        t *= 2
+
+    if max_threads not in thread_pairs:
+        thread_pairs.append(max_threads)
+
+    return thread_pairs
+
+
+def measure_thread_scaling(model_path, prompt_tokens, thread_counts):
+
+    llama_bench = get_binary("llama-bench")
+
+    command = [
+        llama_bench,
+        "-m", str(model_path),
+        "-p", str(prompt_tokens),
+        "-n", "0",
+        "-t", ",".join(str(t) for t in thread_counts),
+        "-o", "csv",
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    csv_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    scaling = []
+    if not csv_lines:
+        return scaling
+
+    reader = csv.DictReader(csv_lines)
+    for row in reader:
+        try:
+            threads = int(row.get("n_threads", 0) or 0)
+            tps = float(row["avg_ts"])
+            scaling.append((threads, tps))
+        except (ValueError, KeyError):
+            continue
+
+    return scaling
 

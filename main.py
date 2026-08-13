@@ -5,20 +5,26 @@ import benchmark as bm
 # All functions live in benchmark.py, main.py only decides what runs and in what order
 
 # Run config
+START_TIME = bm.run_time()
 PROMPTS = ["short", "medium", "long", "very_long"]
 REPEATS = 1
 CONTEXT_SIZE = 8192
 GENERATED_TOKENS = 100
+# CONFIG_TAG = ["baseline", "optimised"]
 CONFIG_TAG = "baseline"
 PERPLEXITY_CHUNKS = 40
-START_TIME = bm.run_time()
+THREAD_CAP = 8
 
 # CSV output config setup
-CSV_FIELDS = [
+RESULTS_FIELDS = [
     "timestamp", "config", "model", "prompt-tier",
     "ctx", "threads", "gen_tokens", "repeat", "peak_ram_mb", "avg_ram_mb",
     "cpu_pct", "prefill_tps", "prefill_tps_stddev", "gen_tps",
     "gen_tps_stddev", "ttft_ms", "perplexity", "perplexity_chunks"]
+
+THREAD_FIELDS = ["model", "config", "prompt-tier", 
+                 "prompt_tokens", "threads", "prefill_tps"]
+
 run_id = (bm.run_time()).strftime("%Y-%m-%d_%H-%M")
 
 def main():
@@ -29,14 +35,30 @@ def main():
     # Download models or use existing models if specified 
     available_models = bm.download_models(models)
 
+    # Check model availability 
+    if not available_models:
+        print("> No models available to benchmark. Exiting pipeline.")
+        return
+
+    # Check prompt availability
+    if not [p for p in PROMPTS if (bm.prompts_dir / f"{p}.txt").exists()]:
+        print("> No prompts found in eval/prompts. Exiting pipeline.")
+        return
+
     # Check/install the perplexity corpus is available for perplexity measurements
     bm.install_perplexity_corpus() 
-    
-    # Detect available CPU cores for thread count measurements
+
+    # Detect available CPU cores
     thread_count = bm.get_thread_count()
 
-    # Create results.csv folder to store benchmark outputs
-    results_csv = bm.ensure_results_csv(run_id, CSV_FIELDS)
+    # Return a list of even numbers of threads capped at 8
+    thread_pairs = bm.get_thread_list(THREAD_CAP)
+
+    # Create results.csv folder to store baseline/optimised benchmark outputs
+    results_csv = bm.ensure_csv(run_id, RESULTS_FIELDS, f"{CONFIG_TAG}_results.csv")
+
+    # Create a thread_scaling.csv file to store baseline/optimised thread scaling measurements 
+    thread_scaling_csv = bm.ensure_csv(run_id, THREAD_FIELDS, f"{CONFIG_TAG}_thread_scaling.csv")
 
     # Main loop returns performance metrics of every baseline/optimised model x every prompt
     for model_name, model_path in available_models:
@@ -56,6 +78,15 @@ def main():
 
             # Returns the number of tokens in the prompt file based on approx. 0.75 word/token ratio
             prompt_tokens = bm.count_tokens(prompt_file)
+
+            # Measure thread throughput per model per prompt
+            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_list)
+                
+            for threads, tps in scaling:
+                bm.append_row(thread_scaling_csv, THREAD_FIELDS, {
+                "model": model_name, "config": CONFIG_TAG,
+                "prompt-tier": prompt, "prompt_tokens": prompt_tokens,
+                "threads": threads, "prefill_tps": tps})
  
             for repeat_number in range(1, REPEATS + 1):
 
@@ -68,7 +99,7 @@ def main():
                 metrics = bm.measure_bench_metrics(model_path, prompt_tokens, GENERATED_TOKENS, thread_count)
  
                 # Assemble CSV row and append values
-                bm.append_row(results_csv, CSV_FIELDS, {
+                bm.append_row(results_csv, RESULTS_FIELDS, {
                     "timestamp": (bm.run_time()).strftime("%Y-%m-%dT%H:%M:%S"),
                     "config": CONFIG_TAG,
                     "model": model_name,
