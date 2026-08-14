@@ -19,8 +19,11 @@ THREAD_CAP = 8
 RESULTS_FIELDS = [
     "timestamp", "config", "model", "prompt-tier",
     "ctx", "threads", "gen_tokens", "repeat", "peak_ram_mb", "avg_ram_mb",
-    "cpu_pct", "prefill_tps", "prefill_tps_stddev", "gen_tps",
-    "gen_tps_stddev", "ttft_ms", "perplexity", "perplexity_chunks"]
+    "cpu_pct", "prefill_tps", "prefill_ms", "prefill_tps_stddev", "gen_tps",
+    "gen_tps_stddev", "ttft_ms", "perplexity", "perplexity_chunks",
+    "model_size_bytes", "model_n_params", "type_k", "type_v",
+    "n_layer", "n_head_kv", "key_length", "value_length",
+    "kv_alloc_mb", "kv_used_mb", "kv_utilisation",]
 
 THREAD_FIELDS = ["model", "config", "prompt-tier", 
                  "prompt_tokens", "threads", "prefill_tps"]
@@ -52,7 +55,7 @@ def main():
     thread_count = bm.get_thread_count()
 
     # Return a list of even numbers of threads capped at 8
-    thread_pairs = bm.get_thread_list(THREAD_CAP)
+    thread_list = bm.get_thread_list(THREAD_CAP)
 
     # Create results.csv folder to store baseline/optimised benchmark outputs
     results_csv = bm.ensure_csv(run_id, RESULTS_FIELDS, f"{CONFIG_TAG}_results.csv")
@@ -80,7 +83,7 @@ def main():
             prompt_tokens = bm.count_tokens(prompt_file)
 
             # Measure thread throughput per model per prompt
-            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_pairs)
+            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_list)
                 
             for threads, tps in scaling:
                 bm.append_row(thread_scaling_csv, THREAD_FIELDS, {
@@ -97,6 +100,8 @@ def main():
 
                 # Returns prompt-processing speed and token generation speed
                 metrics = bm.measure_bench_metrics(model_path, prompt_tokens, GENERATED_TOKENS, thread_count)
+
+                kv = bm.compute_kv_cache(metrics, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
  
                 # Assemble CSV row and append values
                 bm.append_row(results_csv, RESULTS_FIELDS, {
@@ -112,12 +117,24 @@ def main():
                     "avg_ram_mb": avg_ram_mb if avg_ram_mb is not None else "NA",
                     "cpu_pct": cpu_percent if cpu_percent is not None else "NA",
                     "prefill_tps": metrics.get("prefill_tps", "NA"),
+                    "prefill_ms": metrics.get("prefill_ms", "NA"),
                     "prefill_tps_stddev": metrics.get("prefill_tps_stddev", "NA"),
                     "gen_tps": metrics.get("gen_tps", "NA"),
                     "gen_tps_stddev": metrics.get("gen_tps_stddev", "NA"),
                     "ttft_ms": metrics.get("ttft_ms", "NA"),
                     "perplexity": perplexity if perplexity is not None else "NA",
-                    "perplexity_chunks": PERPLEXITY_CHUNKS
+                    "perplexity_chunks": PERPLEXITY_CHUNKS,
+                    "model_size_bytes": metrics.get("model_size_bytes", "NA"),
+                    "model_n_params": metrics.get("model_n_params", "NA"),
+                    "type_k": metrics.get("type_k", "NA"),
+                    "type_v": metrics.get("type_v", "NA"),
+                    "n_layer": metrics.get("n_layer", "NA"),
+                    "n_head_kv": metrics.get("n_head_kv", "NA"),
+                    "key_length": metrics.get("key_length", "NA"),
+                    "value_length": metrics.get("value_length", "NA"),
+                    "kv_alloc_mb": kv.get("kv_alloc_mb", "NA"),
+                    "kv_used_mb": kv.get("kv_used_mb", "NA"),
+                    "kv_utilisation": kv.get("kv_utilisation", "NA"),
                 })
 
     # group by (config, model, prompt), mean/median across repeats

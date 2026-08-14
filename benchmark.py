@@ -218,6 +218,7 @@ def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_co
         "-n", str(generated_tokens),
         "-t", str(thread_count),
         "-o", "csv",
+        "-v",
     ]
 
     result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -226,31 +227,79 @@ def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_co
     csv_lines = [line for line in result.stdout.splitlines() if line.strip()]
     metrics = {
         "prefill_tps": None, 
+        "prefill_ms": None,
         "prefill_tps_stddev": None,
         "gen_tps": None,     
         "gen_tps_stddev": None,
         "ttft_ms": None,
+        "model_size_bytes": None, 
+        "model_n_params": None,
+        "type_k": None, 
+        "type_v": None,
+        "n_layer": None, 
+        "n_head_kv": None,
+        "key_length": None, 
+        "value_length": None,
     }
+
     if not csv_lines:
         return metrics
- 
+
+    prefill_ns = None
     reader = csv.DictReader(csv_lines)
+
     for row in reader:
         prompt_count = int(row.get("n_prompt", 0) or 0)
         gen_count = int(row.get("n_gen", 0) or 0)
+
+        if metrics["model_size_bytes"] is None:
+            metrics["model_size_bytes"] = int(row.get("model_size", 0) or 0) or None
+            metrics["model_n_params"]   = int(row.get("model_n_params", 0) or 0) or None
+            metrics["type_k"] = row.get("type_k")
+            metrics["type_v"] = row.get("type_v")
 
         # prefill
         if prompt_count > 0 and gen_count == 0:
             metrics["prefill_tps"] = float(row["avg_ts"])
             metrics["prefill_tps_stddev"] = float(row["stddev_ts"])
-            metrics["ttft_ms"] = float(row["avg_ns"]) / 1_000_000
+            metrics["prefill_ms"] = float(row["avg_ns"]) / 1_000_000
  
         # generation
         elif gen_count > 0 and prompt_count == 0:
             metrics["gen_tps"] = float(row["avg_ts"])
             metrics["gen_tps_stddev"] = float(row["stddev_ts"])
- 
+
+    if metrics["prefill_ms"] is not None and metrics["gen_tps"]:
+        metrics["ttft_ms"] = round(metrics["prefill_ms"] + (1000.0 / metrics["gen_tps"]), 3)
+
+    log = result.stderr
+
+    def grab_int(suffix):
+        m = re.search(rf"\.{suffix}\s+u32\s+=\s+(\d+)", log)
+        return int(m.group(1)) if m else None
+
+    metrics["n_layer"] = grab_int("block_count")
+    metrics["n_head_kv"] = grab_int("attention.head_count_kv")
+    metrics["key_length"] = grab_int("attention.key_length")
+    metrics["value_length"]= grab_int("attention.value_length")
+
     return metrics
+
+
+def compute_kv_cache(metrics, context_size, prompt_tokens, generated_tokens):
+    try:
+        bytes_per_elem = 1 if metrics.get("type_k") == "q8_0" else 2
+        per_layer = (metrics["n_head_kv"] * metrics["key_length"] + metrics["n_head_kv"] * metrics["value_length"])
+        kv_alloc_mb = round(per_layer * metrics["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
+        
+    except (KeyError, TypeError):
+        return {"kv_alloc_mb": None, "kv_used_mb": None, "kv_utilisation": None}
+
+    util = round((prompt_tokens + generated_tokens) / context_size, 4) if context_size else None
+    kv_used_mb = round(kv_alloc_mb * util, 2) if (kv_alloc_mb and util) else None
+
+    return {"kv_alloc_mb": kv_alloc_mb, "kv_used_mb": kv_used_mb, "kv_utilisation": util}
+    
 
 def install_perplexity_corpus():
 
