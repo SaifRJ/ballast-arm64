@@ -8,7 +8,7 @@ import csv
 import os
 import re
 import zipfile
-import psutil 
+import psutil
 
 # benchmark.py: containds all logic for the Arm64 LLM benchmark harness
 # This file holds every worker function that returns a performance metric, file path helpers, or CSV outputs
@@ -17,7 +17,7 @@ import psutil
 
 # Construct paths
 repo_root = Path(__file__).resolve().parent
-binaries_dir = repo_root / "llama.cpp" / "build" / "bin"
+llama_dir = repo_root / "llama"
 prompts_dir = repo_root / "eval" / "prompts"
 perplexity_dir = repo_root / "eval" / "perplexity"
 results_dir = repo_root / "results"
@@ -109,14 +109,15 @@ def download_models(models):
     return available
 
 
-def get_binary(binary_name):
+def get_binary(binary_name, CONFIG_TAG):
 
+    binaries_dir = llama_dir / f"{CONFIG_TAG}_llama" / "bin"
     binary_path = binaries_dir / binary_name
 
     if not binary_path.exists():
         raise FileNotFoundError(
             f"\n> Required binary '{binary_name}' not found in {binaries_dir}"
-            f"\n> Did you build llama.cpp? (see setup.sh)"
+            f"\n> Did you run setup.sh? (expected build: {CONFIG_TAG}_llama)"
         )
     return str(binary_path)
 
@@ -141,15 +142,16 @@ def ensure_csv(run_id, csv_fields, filename):
 
     return csv_path
 
+
 def append_row(csv_path, csv_fields, row_values):
 
     with open(csv_path, "a", newline="") as csv_file:
         csv.writer(csv_file).writerow([row_values.get(field, "NA") for field in csv_fields])
 
 
-def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thread_count):
+def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thread_count, CONFIG_TAG):
 
-    llama_cli = get_binary("llama-cli")
+    llama_cli = get_binary("llama-cli", CONFIG_TAG)
 
     with tempfile.NamedTemporaryFile("w+", delete=False) as temp_file:
         time_report_path = temp_file.name
@@ -207,9 +209,9 @@ def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thr
     return peak_ram_mb, cpu_percent, avg_ram_mb
 
 
-def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_count):
+def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_count, CONFIG_TAG):
 
-    llama_bench = get_binary("llama-bench")
+    llama_bench = get_binary("llama-bench", CONFIG_TAG)
  
     command = [
         llama_bench,
@@ -291,7 +293,7 @@ def compute_kv_cache(metrics, context_size, prompt_tokens, generated_tokens):
         bytes_per_elem = 1 if metrics.get("type_k") == "q8_0" else 2
         per_layer = (metrics["n_head_kv"] * metrics["key_length"] + metrics["n_head_kv"] * metrics["value_length"])
         kv_alloc_mb = round(per_layer * metrics["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
-        
+
     except (KeyError, TypeError):
         return {"kv_alloc_mb": None, "kv_used_mb": None, "kv_utilisation": None}
 
@@ -327,9 +329,9 @@ def install_perplexity_corpus():
     return wikitext_file if wikitext_file.exists() else None
 
 
-def measure_perplexity(model_path, chunk_count):
+def measure_perplexity(model_path, chunk_count, CONFIG_TAG):
 
-    llama_perplexity = get_binary("llama-perplexity")
+    llama_perplexity = get_binary("llama-perplexity", CONFIG_TAG)
 
     wikitext_file = perplexity_dir / "wiki.test.raw" 
 
@@ -366,9 +368,9 @@ def get_thread_list(THREAD_CAP):
     return thread_pairs
 
 
-def measure_thread_scaling(model_path, prompt_tokens, thread_pairs):
+def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, CONFIG_TAG):
 
-    llama_bench = get_binary("llama-bench")
+    llama_bench = get_binary("llama-bench", CONFIG_TAG)
 
     command = [
         llama_bench,
