@@ -67,7 +67,7 @@ def main():
     for model_name, model_path in available_models:
 
         # Measure model perplexity
-        perplexity = bm.measure_perplexity(model_path, PERPLEXITY_CHUNKS)
+        perplexity = bm.measure_perplexity(model_path, PERPLEXITY_CHUNKS, CONFIG_TAG)
 
         for prompt in PROMPTS:
 
@@ -83,7 +83,7 @@ def main():
             prompt_tokens = bm.count_tokens(prompt_file)
 
             # Measure thread throughput per model per prompt
-            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_list)
+            scaling = bm.measure_thread_scaling(model_path, prompt_tokens, thread_list, CONFIG_TAG)
                 
             for threads, tps in scaling:
                 bm.append_row(thread_scaling_csv, THREAD_FIELDS, {
@@ -96,10 +96,10 @@ def main():
                 print(f"\n> {model_name} / {prompt}: repeat {repeat_number}/{REPEATS}")
  
                 # Returns Peak RAM and CPU% for this model/prompt/repeat combination
-                peak_ram_mb, cpu_percent, avg_ram_mb = bm.measure_ram_cpu(model_path, prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count)
+                peak_ram_mb, cpu_percent, avg_ram_mb = bm.measure_ram_cpu(model_path, prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count, CONFIG_TAG)
 
                 # Returns prompt-processing speed and token generation speed
-                metrics = bm.measure_bench_metrics(model_path, prompt_tokens, GENERATED_TOKENS, thread_count)
+                metrics = bm.measure_bench_metrics(model_path, prompt_tokens, GENERATED_TOKENS, thread_count, CONFIG_TAG)
 
                 kv = bm.compute_kv_cache(metrics, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
  
