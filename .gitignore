@@ -1,11 +1,10 @@
 *.gguf
-models/
-llama.cpp/
-build/
 raw_*.txt
 __pycache__/
 *.pyc
 *.pem
-notes.md
 config.txt
 .venv/
+models/*
+engines/*
+results/*

@@ -1,0 +1,58 @@
+# Ballast Pipeline Configuration
+
+# What engine(s) do you want to use?
+engines:
+  - name: default
+    source: https://github.com/ggml-org/llama.cpp
+    tag: b10327
+    cmake_flags: { GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON }
+
+  # - name: baseline
+  #   source: https://github.com/ggml-org/llama.cpp
+  #   tag: b10327
+  #   cmake_flags: { GGML_NATIVE: OFF }
+
+# What models do you want to benchmark?
+# Specify a 'name' (can be anything) and a source (local path or URL to a GGUF file)
+# Note: if you are specifying a local path, the name MUST match the file name. 
+models:
+  - name: Gemma-3
+    source: https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
+  - name: Qwen-3
+    source: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
+  - name: Llama-3.2
+    source: https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf
+  - name: Phi-4
+    source: https://huggingface.co/bartowski/microsoft_Phi-4-mini-instruct-GGUF/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf
+
+# How should the pipeline run?
+mode: snapshot # placeholder sampling preset ( snapshot / time-series )
+task: benchmark # task type (benchmark / optimise / compare)
+
+run_settings:
+  context_size: 8192
+  generated_tokens: 100
+  repeats: 1
+  perplexity_chunks: 40
+  prompts: [short, medium, long, very_long]
+  thread_scaling: auto        # auto | [1, 2, 4, 8] | false
+
+# llama.cpp CLI flags passed at inference time.
+runtime_flags:
+  fa: 1
+  cache_type: q8_0
+  batch_size: 4096
+
+# What do you want to measure?
+# Model meta data (n_layer, type_k, model_size_bytes, etc.) is always recorded.
+# Use 'all' to enable everything below.
+metrics:
+  - cpu_percent
+  - peak_ram_mb
+  - avg_ram_mb
+  - prefill_tps
+  - gen_tps
+  - ttft_ms
+  - perplexity
+  - kv_cache
+  # - power_draw
