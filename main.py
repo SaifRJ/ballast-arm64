@@ -69,6 +69,11 @@ run_id = (bm.run_time()).strftime("%Y-%m-%d_%H-%M")
 
 def main():
 
+    available_engines = bm.check_engines(config["engines"])
+    if not available_engines:
+        print("> No engines available. Exiting pipeline.")
+        return
+
     # Download models or use existing models if specified 
     available_models = bm.download_models(models)
 
@@ -85,7 +90,7 @@ def main():
 
     thread_list = bm.get_thread_list(THREAD_CAP)
 
-    for engine in config["engines"]:
+    for engine in available_engines:
 
         engine_name = engine["name"]
 

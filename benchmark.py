@@ -24,6 +24,7 @@ prompts_dir = repo_root / "eval" / "prompts"
 perplexity_dir = repo_root / "eval" / "perplexity"
 results_dir = repo_root / "results"
 models_dir = repo_root / "models"
+REQUIRED_BINARIES = ["llama-cli", "llama-bench", "llama-perplexity"]
 
 def run_time():
     return datetime.now().astimezone()
@@ -39,6 +40,49 @@ def load_config():
     
     with open(ballast_yaml) as f:
         return yaml.safe_load(f)
+
+
+def check_engines(engines):
+    available = []
+    print("\n> Verifying engine(s)...")
+
+    for engine in engines:
+        engine_name = engine["name"]
+        bin_dir = engines_dir / engine_name / "build" / "bin"
+        missing = [b for b in REQUIRED_BINARIES if not (bin_dir / b).exists()]
+
+        if missing:
+            print(f"> ERROR: engine '{engine_name}' missing binaries: {', '.join(missing)}"
+                  f"\n-> Expected in: {bin_dir}"
+                  f"\n-> Skipping engine.")
+            continue
+
+        print(f"> [{engine_name}] OK")
+        available.append(engine)
+
+    return available
+
+
+def check_engines(engines):
+    """Verify each engine has all required binaries. Returns list of usable engine dicts."""
+    available = []
+    print("\n> Verifying engines...")
+
+    for engine in engines:
+        engine_name = engine["name"]
+        bin_dir = engines_dir / engine_name / "build" / "bin"
+        missing = [b for b in REQUIRED_BINARIES if not (bin_dir / b).exists()]
+
+        if missing:
+            print(f"-> ERROR: engine '{engine_name}' missing binaries: {', '.join(missing)}"
+                  f"\n   Expected in: {bin_dir}"
+                  f"\n   Skipping this engine.")
+            continue
+
+        print(f"-> [{engine_name}] OK")
+        available.append(engine)
+
+    return available
 
 
 def download_models(models):
