@@ -1,4 +1,4 @@
-<img src="assets/ballast-logo.svg" alt="Ballast for Arm64"/>
+<img src="assets/ballast-logo.svg" alt="Ballast for Arm64" style="width: 600px;" />
 
 **Ballast** is a benchmarking and optimisation pipeline for LLM inference on Arm64 hardware. It evaluates model performance across the principal factors that affect inference throughput and resource usage, including memory footprint, prompt-processing throughput, token-generation rate, KV-cache behaviour, and thread scaling. It also provides a consistent framework for comparing inference engine builds, quantisation strategies, and configuration parameters under controlled conditions.
 
