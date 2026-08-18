@@ -1,57 +1,120 @@
-# Project Thesis
+<img src="assets/ballast-logo.svg" alt="Ballast for Arm64"/>
 
-This is a solo-developer project which benchmarks the RAM utilisation of various LLMs on Arm64 Graviton, with the goal of evaluating and improving performance metrics using KV-cache quantisation and Arm-specific build flags in llama.cpp. 
+**Ballast** is a benchmarking and optimisation pipeline for LLM inference on Arm64 hardware. It evaluates model performance across the principal factors that affect inference throughput and resource usage, including memory footprint, prompt-processing throughput, token-generation rate, KV-cache behaviour, and thread scaling. It also provides a consistent framework for comparing inference engine builds, quantisation strategies, and configuration parameters under controlled conditions.
 
-This project aims to have three core deliverables:
+Rather than relying on isolated measurements or nominal performance figures, Ballast provides a repeatable and configurable benchmarking process that produces structured results suitable for direct comparison and further analysis.
 
-1. A standardised benchmarking pipeline (benchmark.py) that tests, measures, and records LLM performance on Arm64 chips using custom and built-in llama.cpp functions. This tool is used to measure how effective the implemented optimisations are for each model.  
-2. KV-Cache quantisation to halve the amount of RAM used whilst minimally affecting output quality.
-3. Arm-specific build flags to optimise llama.cpp functions on Arm64 chips
+## What it does
 
-All deliverables are designed as a 'harness' meant to be dropped directly into llama.cpp on any instance of Linux Arm64 and executed for ease of use.
+Given a `ballast.yaml` defining the models, engine builds, and measurement parameters, Ballast:
 
-Development Environment Specs:
+- **Provisions the environment**: clones and builds the specified `llama.cpp` configurations, downloads models from Hugging Face or accepts local GGUF files, and fetches any required evaluation content.
+- **Runs the benchmark suite**: executes every combination of engine, model, prompt tier, and repeat, recording per-run metrics to timestamped CSV files.
+- **Records reproducibility metadata**: captures the `llama.cpp` git SHA, CMake configuration flags, host CPU details, and other relevant information alongside each run.
 
-Developed and tested on AWS Graviton3 (c7g.2xlarge EC2 Instance), Arm64 Ubuntu 24.04, 8 vCPU Cores, 60GB of Storage, 16GB RAM, llama.cpp version x.x
+The entire benchmark is configured through a single YAML file. Users specify what to benchmark, Ballast then manages the execution and measurement process.
 
+## Features
 
-## Benchmarking Methodology
+- **Runs on Arm64 hardware:** Runs on hardware supported by `llama.cpp`, including Graviton, Ampere, Grace, Raspberry Pi, and Apple Silicon.
+- **Supports GGUF models:** models hosted on Hugging Face as well as local GGUF files specified in `ballast.yaml`.
+- **Multiple engine builds:** Compares baseline and optimised engine configurations in a single run, with independent CMake flags for each build.
+- **Configurable measurements:** Context size, generation length, thread-count sweeps, repeat counts, and perplexity chunk counts are configured directly from YAML.
+- **Reproducibility:** Records the `llama.cpp` commit SHA, build flags, and hardware fingerprint for every benchmark result.
+- **Idempotent installation:** Re-running an unchanged configuration requires no additional work. Changes to models or engine configurations only trigger the necessary additional steps.
 
-A select group of four LLMs were asked the same 5 prompts of varying length (prompts equivalent to 10, 200, 1000, 4000, 8000 tokens) to observe how fuller context windows affect specific performance metrics. 
+## Benchmarking Metrics
 
-The metrics measured and recorded were:
-- Peak RAM utilisation (mean & median across repeated runs, from /usr/bin/time)
-- Average RAM utilisation (mean & median across repeated runs, sampled RSS during the run)
-- CPU % Utilisation
-- Prompt-processing speed (prefill, from llama-bench)
-- Time-to-first-token (ms, from llama-bench)
-- Token generation speed (tokens/sec, from llama-bench)
-- Perplexity (one value per config, from llama-perplexity)
-- Thread-scaling (how much work is done on varying thread counts)
+Ballast can record the following metrics for each benchmark run:
 
-LLM models tested:
-- Gemma 3 4B (Google)
-- Qwen3 4B (Alibaba)
-- Llama 3.2 3B (Meta)
-- Phi-4-mini 3.8B (Microsoft)
-- **Note: any LLMs that are llama.cpp compatible and in a GGUF file format can be used!**
+- **Peak RAM** — maximum resident set size (RSS) observed during the run.
+- **Average RAM** — RSS sampled at 100 ms intervals and aggregated over the run.
+- **CPU utilisation** — proportion of available CPU capacity consumed during inference.
+- **Prompt-processing speed** — prefill throughput, measured in tokens per second.
+- **Token generation speed** — decode throughput, measured in tokens per second.
+- **Time-to-first-token** — latency between prompt submission and generation of the first output token.
+- **Perplexity** — model performance measured against an evaluation corpus.
+- **Thread scaling** — inference throughput as a function of thread count.
+- **KV-cache** — allocated and used cache size, together with utilisation relative to the configured context window.
 
-Prompts used:
-- Found in 'eval/prompts' folder, contains prompts ranging from just ~7 tokens to ~8000 tokens to observe how varying context window sizes affect specific metrics
+Model metadata, including parameter count, layer count, KV-head configuration, and quantisation types, is also captured automatically for each run.
 
-## Optimisation Methodology
+## Run Modes and Tasks
 
-## Optimisation Achieved
+Ballast supports multiple sampling modes and task types, configured through `ballast.yaml`.
 
-## Setup & Reproducing Results
+**Sampling modes** define how measurements are collected during a run:
 
-## Findings & Limitations
+- **`standard`:** Performs a single measurement per model. Intended for rapid iteration and preliminary results.
+- **`time-series`:** Performs extended benchmarking with continuous time-series sampling. This can identify thermal throttling, memory leaks, and KV-cache growth that may not be apparent in shorter runs. Expect long run times.
 
-Findings:
-- 
+**Task types** define the purpose of the run:
 
-Limitations:
-- Due to the nature of this project mostly being on a Cloud VM, measuring power-draw efficiency and optimisation was unfortunately not plausible.
-- Optimising model size on disk was not accounted for, and is not the goal of this project.
+- **`benchmark`:** Runs the specified engine × model × prompt matrix and records the configured measurements.
+- **`optimise`:** Sweeps runtime configurations, including flags, thread counts, and cache quantisation, to identify the best-performing configuration for a given model and hardware platform.
+- **`compare`:** Compares results against previous runs to identify statistically significant performance changes.
 
-## Additional Resources
+Ballast can also be integrated into CI pipelines to detect performance regressions when changes are made to the inference stack.
+
+## Requirements
+
+- Arm64 Linux (Ubuntu/Debian tested)
+- Python 3.10 or newer
+- Approximately 20GB of free disk space for a typical multi-model, multi-engine run
+
+macOS support is planned.
+
+## Setup
+
+Clone the repository: 
+~~~
+git clone https://github.com/<owner>/ballast-arm64.git
+~~~
+
+Run the `bootstrap.sh` script:
+~~~
+cd ballast-arm64
+./bootstrap.sh
+~~~
+
+Activate the environment:
+~~~
+source .venv/bin/activate
+~~~
+
+Finally, edit `ballast.yaml` to define the benchmark run, including the engines, models, and measurement parameters. A working default configuration is included.
+
+Run the pipeline:
+~~~
+python3 -m ballast
+~~~
+
+On a first run, Ballast installs or locates the LLM models specified, builds the llama.cpp configurations entries, and fetches any evaluation content needed (e.g. perplexity corpus) before benchmarking. Subsequent runs will skip straight to benchmarking.
+
+All results and outputs are saved to `results/Benchmark_<timestamp>/` - one folder is generated per each run of the pipeline.
+
+## Configuration
+
+`ballast.yaml` is the single source of truth for a benchmark run. The main configuration sections are:
+
+- **`engines:`** One entry for each `llama.cpp` build to benchmark. Each entry specifies a source repository, git tag, and CMake flags. Pre-built `llama.cpp` directories can be referenced using `path:` instead.
+- **`models:`** One entry for each model, specified by a GGUF URL or local file path.
+- **`run_settings:`** Measurement parameters including context size, generation token count, repeat count, thread-scaling behaviour, and prompt/token settings.
+- **`metrics:`** Specifies which measurements to collect. Model metadata is recorded for every run regardless of the selected metrics.
+
+The default `ballast.yaml` included in the repository provides a working example that can be copied and modified.
+
+## Project scope
+
+Ballast enables users to compare configurations and identify which optimisation strategies provide measurable benefits on their specific hardware. Reported performance differences reflect the combined effect of engine build, quantisation, and runtime configuration. The separation of these contributions is the user's job, and Ballast is designed to make that separation possible and easy.
+
+## Limitations
+
+- Power draw measurement is not currently supported.
+- Cross-platform support is not yet supported but is planned as part of a broader refactor toward direct `llama.cpp` integration.
+- KV cache accounting assumes standard-attention transformer architectures. Models with exotic attention mechanisms (MLA, recurrent) report N/A for cache metrics.
+- The TTFT metric is currently an approximation. Direct integration with `llama.cpp` is planned to provide more accurate measurement.
+
+## License
+
+This project falls under MIT Licensing. Please see LICENSE.md for more details.
