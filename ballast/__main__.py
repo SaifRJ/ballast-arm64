@@ -1,21 +1,23 @@
-import benchmark as bm
+from ballast.config import load_config, prompts_dir, engines_dir, results_dir
+import ballast.benchmark as bm
+import ballast.install as inst
 
 # main.py: orchestration for the Arm64 LLM benchmarking pipeline
 # Manages code orchestration and the core benchmarking loop
 # All functions live in benchmark.py, main.py only decides what runs and in what order
 
 START_TIME = bm.run_time()
-config = bm.load_config()
+
+config = load_config()
 
 # Run config
 run = config["run_settings"]
 CONTEXT_SIZE = run["context_size"]
 GENERATED_TOKENS = run["generated_tokens"]
 REPEATS = run["repeats"]
-THREAD_CAP = run["thread_cap"]
+THREAD_SCALING = run["thread_cap"]
 PERPLEXITY_CHUNKS = run["perplexity_chunks"]
 PROMPTS = run["prompts"]
-models = [(m["name"], m["source"]) for m in config["models"]]
 
 # CSV output config setup
 RESULTS_FIELDS = [
@@ -69,36 +71,34 @@ run_id = (bm.run_time()).strftime("%Y-%m-%d_%H-%M")
 
 def main():
 
-    available_engines = bm.check_engines(config["engines"])
-    if not available_engines:
-        print("> No engines available. Exiting pipeline.")
-        return
+    engines = inst.ensure_engines_ready(config["engines"])
 
-    # Download models or use existing models if specified 
-    available_models = bm.download_models(models)
+    # Validate, install, and return successful model installations
+    inst.validate_model_entries(config["models"])
+    inst.install_models(config["models"])
+    models = inst.get_available_models(config["models"])
 
-    # Check model availability 
-    if not available_models:
-        print("> No models available to benchmark. Exiting pipeline.")
-        return
-
-    # Check/install the perplexity corpus is available for perplexity measurements
-    bm.install_perplexity_corpus() 
+    inst.ensure_corpus_ready()   
 
     # Detect available CPU cores
     thread_count = bm.get_thread_count()
 
-    thread_list = bm.get_thread_list(THREAD_CAP)
+    thread_list = bm.get_thread_list(THREAD_SCALING)
 
-    for engine in available_engines:
+    for engine in engines:
 
         engine_name = engine["name"]
+
+        bm.snapshot_manifests(engine, run_id)
 
         # Prepare CSV output
         results_csv = bm.ensure_csv(run_id, RESULTS_FIELDS, f"{engine_name}_results.csv")
         thread_scaling_csv = bm.ensure_csv(run_id, THREAD_FIELDS, f"{engine_name}_thread_scaling.csv")
 
-        for model_name, model_path in available_models:
+        for model in models:
+            
+            model_name = model["name"]
+            model_path = model["local_path"]
 
             # Measure model perplexity
             perplexity = bm.measure_perplexity(model_path, PERPLEXITY_CHUNKS, engine_name)
@@ -106,7 +106,7 @@ def main():
             for prompt in PROMPTS:
 
                 # Locate prompt file
-                prompt_file = bm.prompts_dir / f"{prompt}.txt"
+                prompt_file = prompts_dir / f"{prompt}.txt"
 
                 if not prompt_file.exists():
                     print(f"\n> ERROR: Unable to read prompt '{prompt}' (file missing: {prompt_file}). Prompt will be skipped.")

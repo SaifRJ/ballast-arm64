@@ -1,135 +1,18 @@
+from ballast.config import engines_dir, results_dir, perplexity_dir
 from pathlib import Path
-from datetime import datetime
 import time
 import subprocess
 import tempfile
-import shutil
 import csv
 import os
 import re
-import zipfile
 import psutil
-import yaml
+import shutil
 
 # benchmark.py: contains all logic for the Arm64 LLM benchmark harness
 # This file holds every worker function that returns a performance metric, file path helpers, or CSV outputs
 # No orchestration lives here; that is the job of main.py
 # All paths are anchored to this file's root so the pipeline runs from anywhere without a .env or absolute paths
-
-# Construct paths
-repo_root = Path(__file__).resolve().parent
-ballast_yaml = repo_root / "ballast.yaml"
-engines_dir = repo_root / "engines"
-prompts_dir = repo_root / "eval" / "prompts"
-perplexity_dir = repo_root / "eval" / "perplexity"
-results_dir = repo_root / "results"
-models_dir = repo_root / "models"
-REQUIRED_BINARIES = ["llama-cli", "llama-bench", "llama-perplexity"]
-
-def run_time():
-    return datetime.now().astimezone()
-
-
-def load_config():
-
-    if not ballast_yaml.exists():
-        raise ValueError(
-        f"\n> No ballast.yaml found at {ballast_yaml}"
-        f"\n-> Create a ballast.yaml at the repo root before running."
-        )
-    
-    with open(ballast_yaml) as f:
-        return yaml.safe_load(f)
-
-
-def check_engines(engines):
-    available = []
-    print("\n> Verifying engine(s)...")
-
-    for engine in engines:
-        engine_name = engine["name"]
-        bin_dir = engines_dir / engine_name / "build" / "bin"
-        missing = [b for b in REQUIRED_BINARIES if not (bin_dir / b).exists()]
-
-        if missing:
-            print(f"> ERROR: engine '{engine_name}' missing binaries: {', '.join(missing)}"
-                  f"\n-> Expected in: {bin_dir}"
-                  f"\n-> Skipping engine.")
-            continue
-
-        print(f"> [{engine_name}] OK")
-        available.append(engine)
-
-    return available
-
-
-def check_engines(engines):
-    """Verify each engine has all required binaries. Returns list of usable engine dicts."""
-    available = []
-    print("\n> Verifying engines...")
-
-    for engine in engines:
-        engine_name = engine["name"]
-        bin_dir = engines_dir / engine_name / "build" / "bin"
-        missing = [b for b in REQUIRED_BINARIES if not (bin_dir / b).exists()]
-
-        if missing:
-            print(f"-> ERROR: engine '{engine_name}' missing binaries: {', '.join(missing)}"
-                  f"\n   Expected in: {bin_dir}"
-                  f"\n   Skipping this engine.")
-            continue
-
-        print(f"-> [{engine_name}] OK")
-        available.append(engine)
-
-    return available
-
-
-def download_models(models):
-
-    models_dir.mkdir(parents=True, exist_ok=True)
-    available = []
-
-    print("\n> Verifying models (installing new or missing instances)...")
-    for model_name, source in models:
-
-        local_path = models_dir / f"{model_name}.gguf"
-
-        # check if model is already in /models
-        if local_path.exists():
-            print(f"-> [{model_name}] already installed at {local_path.name}, skipping.")
-            available.append((model_name, local_path))
-            continue
-
-        # check if file path is local, copy into /models
-        if not source.lower().startswith("http"):
-            src_path = Path(source)
-
-            if src_path.exists():
-                shutil.copy2(src_path, local_path)
-                print(f"-> [{model_name}] copied local file into {local_path.name}")
-                available.append((model_name, local_path))
-            else:
-                print(f"\n> ERROR: '{model_name}' points to a local file that was not found: {source}"
-                      f"\n-> Provide a download URL or a valid local .gguf file path instead.")
-            continue
-
-        # download model from url
-        print(f"> Downloading {model_name} from {source} ...")
-        command = ["wget", "-q", "--show-progress", "-O", str(local_path), source]
-        try:
-            subprocess.run(command, check=True)
-            available.append((model_name, local_path))
-            print(f"> {model_name} successfully downloaded to {local_path.name}")
-
-        except subprocess.CalledProcessError:
-            if local_path.exists():
-                local_path.unlink()
-            print(f"\n> ERROR: Failed to download '{model_name}' from {source} (skipping).",
-                  "\n-> Verify the URL in ballast.yaml points directly to a .gguf file.")
-
-    return available
-
 
 def get_binary(binary_name, engine_name):
 
@@ -170,6 +53,17 @@ def append_row(csv_path, csv_fields, row_values):
 
     with open(csv_path, "a", newline="") as csv_file:
         csv.writer(csv_file).writerow([row_values.get(field, "NA") for field in csv_fields])
+
+
+def snapshot_manifests(engines, run_id):
+
+    run_folder = results_dir / f"Benchmark_{run_id}"
+
+    for engine in engines:
+        name = engine["name"]
+        src = engines_dir / name / "manifest.json"
+        dst = run_folder / f"{name}_manifest.json"
+        shutil.copy2(src, dst)
 
 
 def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thread_count, engine_name):
@@ -323,32 +217,6 @@ def compute_kv_cache(metrics, context_size, prompt_tokens, generated_tokens):
     kv_used_mb = round(kv_alloc_mb * util, 2) if (kv_alloc_mb and util) else None
 
     return {"kv_alloc_mb": kv_alloc_mb, "kv_used_mb": kv_used_mb, "kv_utilisation": util}
-    
-
-def install_perplexity_corpus():
-
-    perplexity_dir.mkdir(parents=True, exist_ok=True)
-    wikitext_file = perplexity_dir / "wiki.test.raw"
-
-    if wikitext_file.exists():
-        return wikitext_file
-
-    url = "https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip"
-    zip_path = perplexity_dir / "wikitext-2-raw-v1.zip"
-
-    print("\n> Fetching perplexity corpus (wikitext-2-raw)...")
-    try:
-        subprocess.run(["wget", "-q", "--show-progress", "-O", str(zip_path), url], check=True)
-        with zipfile.ZipFile(zip_path) as zf:
-            member = next(n for n in zf.namelist() if n.endswith("wiki.test.raw"))
-            with zf.open(member) as src, open(perplexity_dir / "wiki.test.raw", "wb") as dst:
-                dst.write(src.read())
-
-    except (subprocess.CalledProcessError, zipfile.BadZipFile, StopIteration, OSError) as e:
-        print(f"\n> ERROR: Failed to fetch/extract wikitext corpus (perplexity will be skipped) [{e}]")
-        return None
-
-    return wikitext_file if wikitext_file.exists() else None
 
 
 def measure_perplexity(model_path, chunk_count, engine_name):
