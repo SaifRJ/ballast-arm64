@@ -4,12 +4,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=============================================="
-echo " Ballast Bootstrap"
+echo " Ballast Bootstrap "
 echo "=============================================="
 
 # Detect OS and set package manager commands
 echo ""
-echo "> Detecting platform..."
+echo "> Detecting OS platform..."
 case "$(uname -s)" in
     Linux*)
         OS="linux"
@@ -29,11 +29,11 @@ case "$(uname -s)" in
         ;;
     *)
         echo "> ERROR: Unsupported OS: $(uname -s)"
-        echo "-> Ballast currently supports Linux (Debian/Ubuntu) and macOS."
+        echo "-> Ballast currently only supports Linux (Debian/Ubuntu) and macOS."
         exit 1
         ;;
 esac
-echo "> Platform: ${OS}"
+echo "> OS Platform: ${OS}"
 
 # System dependencies
 echo ""
@@ -64,10 +64,9 @@ pip install --upgrade pip
 pip install -r "${REPO_ROOT}/requirements.txt"
 
 echo ""
-echo " Bootstrap complete."
+echo " Ballast bootstrap complete."
 echo ""
 echo " Next steps:"
 echo " -> source .venv/bin/activate"
-echo " -> python3 install.py       # build engines from ballast.yaml"
-echo " -> python3 main.py          # run benchmarks"
+echo " -> python3 main.py
 echo "=============================================="

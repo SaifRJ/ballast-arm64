@@ -7,10 +7,11 @@ engines:
     tag: b10327
     cmake_flags: { GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON }
 
-  # - name: baseline
-  #   source: https://github.com/ggml-org/llama.cpp
-  #   tag: b10327
-  #   cmake_flags: { GGML_NATIVE: OFF }
+  - name: baseline
+    source: https://github.com/ggml-org/llama.cpp
+    tag: b10327
+    cmake_flags: { GGML_NATIVE: OFF }
+
 
 # What models do you want to benchmark?
 # Specify a 'name' (can be anything) and a source (local path or URL to a GGUF file)
@@ -28,6 +29,9 @@ models:
 # How should the pipeline run?
 mode: snapshot # placeholder sampling preset ( snapshot / time-series )
 task: benchmark # task type (benchmark / optimise / compare)
+
+install:
+  parallel_builds: 1
 
 run_settings:
   context_size: 8192
