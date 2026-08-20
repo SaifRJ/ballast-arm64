@@ -1,4 +1,4 @@
-from ballast.config import engines_dir, results_dir, perplexity_dir
+from ballast.config import engines_dir, results_dir, perplexity_dir, run_time
 from pathlib import Path
 import time
 import subprocess
@@ -13,6 +13,69 @@ import shutil
 # This file holds every worker function that returns a performance metric, file path helpers, or CSV outputs
 # No orchestration lives here; that is the job of main.py
 # All paths are anchored to this file's root so the pipeline runs from anywhere without a .env or absolute paths
+
+PERFORMANCE_FIELDS = [
+    # Run / workload
+    "timestamp",
+    "engine",
+    "model",
+    "prompt",
+    "ctx",
+    "threads",
+    "repeat",
+
+    # Prefill performance
+    "prefill_tps",
+    "prefill_ms",
+    "prefill_tps_stddev",
+
+    # Generation performance
+    "gen_tokens",
+    "gen_tps",
+    "gen_tps_stddev",
+    "ttft_ms",
+
+    # CPU/RAM
+    "cpu_pct",
+    "avg_ram_mb",
+    "peak_ram_mb",
+
+    # KV cache
+    "kv_used_mb",
+    "kv_utilisation",
+]
+
+MODEL_INFO_FIELDS = [
+    # Written once per (engine, model), static architecture metadata
+    "engine",
+    "model",
+    "model_size_bytes",
+    "model_n_params",
+    "n_layer",
+    "n_head_kv",
+    "type_k",
+    "type_v",
+    "key_length",
+    "value_length",
+    "kv_alloc_mb",
+]
+
+PERPLEXITY_FIELDS = [
+    "engine",
+    "model",
+    "corpus",
+    "chunks",
+    "perplexity",
+]
+
+THREAD_FIELDS = [
+    "engine",
+    "model",
+    "prompt",
+    "prompt_tokens",
+    "threads",
+    "prefill_tps",
+]
 
 def get_binary(binary_name, engine_name):
 
@@ -35,6 +98,16 @@ def get_thread_count():
 def count_tokens(prompt_file):
     word_count = len(prompt_file.read_text().split())
     return max(1, round(word_count / 0.75))
+
+
+def create_run_outputs(run_id, engine_name):
+
+    return {
+        "performance": ensure_csv(run_id, PERFORMANCE_FIELDS, f"performance_{engine_name}.csv"),
+        "model_info": ensure_csv(run_id, MODEL_INFO_FIELDS, f"model_info_{engine_name}.csv"),
+        "perplexity": ensure_csv(run_id, PERPLEXITY_FIELDS, f"perplexity_{engine_name}.csv"),
+        "threads": ensure_csv(run_id, THREAD_FIELDS, f"thread_scaling_{engine_name}.csv"),
+    }
 
 
 def ensure_csv(run_id, csv_fields, filename):
@@ -123,7 +196,11 @@ def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thr
     cpu_percent = int(cpu_percent_match.group(1)) if cpu_percent_match else None
     avg_ram_mb = (int(sum(rss_samples) / len(rss_samples)) // (1024 * 1024)) if rss_samples else None
 
-    return peak_ram_mb, cpu_percent, avg_ram_mb
+    return {
+        "peak_ram_mb": peak_ram_mb,
+        "cpu_pct": cpu_percent,
+        "avg_ram_mb": avg_ram_mb
+    }
 
 
 def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_count, engine_name):
@@ -288,3 +365,68 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, engine_name)
             continue
 
     return scaling
+
+def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, metrics, ram_cpu, kv):
+
+    append_row(csv_path, PERFORMANCE_FIELDS, {
+        "timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
+        "engine": engine_name,
+        "model": model["name"],
+        "prompt": prompt,
+        "ctx": ctx,
+        "threads": threads,
+        "repeat": repeat_number,
+        "prefill_tps": metrics.get("prefill_tps", "NA"),
+        "prefill_ms": metrics.get("prefill_ms", "NA"),
+        "prefill_tps_stddev": metrics.get("prefill_tps_stddev", "NA"),
+        "gen_tokens": gen_tokens,
+        "gen_tps": metrics.get("gen_tps", "NA"),
+        "gen_tps_stddev": metrics.get("gen_tps_stddev", "NA"),
+        "ttft_ms": metrics.get("ttft_ms", "NA"),
+        "cpu_pct": ram_cpu.get("cpu_pct", "NA"),
+        "avg_ram_mb": ram_cpu.get("avg_ram_mb", "NA"),
+        "peak_ram_mb": ram_cpu.get("peak_ram_mb", "NA"),
+        "kv_used_mb": kv.get("kv_used_mb", "NA"),
+        "kv_utilisation": kv.get("kv_utilisation", "NA")
+    })
+
+
+def record_model_info(csv_path, engine_name, model, metrics, kv):
+
+    append_row(csv_path, MODEL_INFO_FIELDS, {
+        "engine": engine_name,
+        "model": model["name"],
+        "model_size_bytes": metrics.get("model_size_bytes", "NA"),
+        "model_n_params": metrics.get("model_n_params", "NA"),
+        "n_layer": metrics.get("n_layer", "NA"),
+        "n_head_kv": metrics.get("n_head_kv", "NA"),
+        "type_k": metrics.get("type_k", "NA"),
+        "type_v": metrics.get("type_v", "NA"),
+        "key_length": metrics.get("key_length", "NA"),
+        "value_length": metrics.get("value_length", "NA"),
+        "kv_alloc_mb": kv.get("kv_alloc_mb", "NA")
+    })
+
+
+def record_perplexity(csv_path, engine_name, model, corpus, perplexity):
+
+    append_row(csv_path, PERPLEXITY_FIELDS, {
+        "engine": engine_name,
+        "model": model["name"],
+        "corpus": corpus["name"],
+        "chunks": corpus["chunks"],
+        "perplexity": perplexity if perplexity is not None else "NA"
+    })
+
+
+def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling):
+
+    for threads, tps in scaling:
+        append_row(csv_path, THREAD_FIELDS, {
+            "engine": engine_name,
+            "model": model["name"],
+            "prompt": prompt,
+            "prompt_tokens": prompt_tokens,
+            "threads": threads,
+            "prefill_tps": tps
+        })

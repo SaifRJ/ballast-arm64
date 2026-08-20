@@ -9,7 +9,7 @@ import json
 import os
 
 
-def validate_engines_entries(engines):
+def validate_engine_entries(engines):
 
     # Validate every engine entry from ballast.yaml before install runs
     # Checks structural shape and that URLs / tags / paths resolve
@@ -192,20 +192,6 @@ def install_engines(engines):
             build_engine(engine)
         else:
             print(f"-> [{name}] already built, manifest matches, skipping.")
-
-
-def get_available_engines(engines):
-
-    available = []
-    for engine in engines:
-        name = engine["name"]
-        bin_dir = engines_dir / name / "build" / "bin"
-
-        if all((bin_dir / b).exists() for b in REQUIRED_BINARIES):
-            engine["bin_dir"] = bin_dir
-            available.append(engine)
-
-    return available
 
 
 def build_engine(engine):
