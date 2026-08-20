@@ -37,7 +37,6 @@ run_settings:
   context_size: 8192
   generated_tokens: 100
   repeats: 1
-  perplexity_chunks: 40
   prompts: [short, medium, long, very_long]
   thread_scaling: auto        # auto | [1, 2, 4, 8] | false
 
@@ -65,3 +64,4 @@ metrics:
 corpora:
   - name: wikitext-2
     source: https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip
+    chunks: 40
