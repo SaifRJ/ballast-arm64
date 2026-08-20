@@ -496,27 +496,174 @@ def get_available_models(models):
     return available
 
 
-def install_perplexity_corpus():
+def validate_corpus_entries(corpora):
+
+    if not corpora:
+        raise ValueError(
+            "\n> No corpora defined in ballast.yaml."
+            "\n-> Add at least one entry under 'corpora:' before running."
+        )
+
+    seen_names = set()
+
+    for index, corpus in enumerate(corpora, 1):
+
+        name = corpus.get("name")
+        if not name or not isinstance(name, str) or not name.strip():
+            raise ValueError(
+                f"\n> Corpus at position {index} is missing 'name' or has an empty name."
+                f"\n-> Every corpus entry needs a non-empty 'name' field."
+            )
+        name = name.strip()
+
+        if name in seen_names:
+            raise ValueError(
+                f"\n> Duplicate corpus name: '{name}'."
+                f"\n-> Corpus names must be unique within ballast.yaml."
+            )
+        seen_names.add(name)
+
+        if "/" in name or "\\" in name or name.startswith("."):
+            raise ValueError(
+                f"\n> Corpus name '{name}' contains invalid characters."
+                f"\n-> Names must not contain '/', '\\', or start with '.'"
+            )
+
+        source = corpus.get("source")
+        if not source or not isinstance(source, str):
+            raise ValueError(
+                f"\n> Corpus '{name}' is missing 'source' or 'source' is not a string."
+                f"\n-> 'source' should be a URL or local filepath (.txt, .raw, or .zip)."
+            )
+        source = source.strip()
+
+        chunks = corpus.get("chunks")
+        if chunks != "all" and (not isinstance(chunks, int) or chunks < 1):
+            raise ValueError(
+                f"\n> Corpus '{name}' has invalid 'chunks': {chunks!r}"
+                f"\n-> 'chunks' must be a positive integer or 'all'."
+            )
+
+        if source.lower().startswith("http"):
+            _validate_corpus_url(name, source)
+        else:
+            _validate_corpus_local_path(name, source)
+
+    print(f"> {len(corpora)} corpus spec(s) validated.")
+    return corpora
+
+
+def _validate_corpus_url(corpus_name, source):
+
+    try:
+        req = Request(source, method="HEAD")
+        with urlopen(req, timeout=15) as response:
+            if response.status >= 400:
+                raise ValueError(
+                    f"\n> Corpus '{corpus_name}': URL returned HTTP {response.status}"
+                    f"\n-> Source: {source}"
+                )
+    except HTTPError as e:
+        raise ValueError(
+            f"\n> Corpus '{corpus_name}': URL not reachable (HTTP {e.code})"
+            f"\n-> Source: {source}"
+        )
+    except URLError as e:
+        raise ValueError(
+            f"\n> Corpus '{corpus_name}': URL not reachable"
+            f"\n-> Source: {source}"
+            f"\n-> Error: {e.reason}"
+        )
+
+
+def _validate_corpus_local_path(corpus_name, source):
+
+    path = Path(source).expanduser().resolve()
+
+    if not path.exists():
+        raise ValueError(
+            f"\n> Corpus '{corpus_name}' points to a local file that does not exist: {path}"
+        )
+    if not path.is_file():
+        raise ValueError(
+            f"\n> Corpus '{corpus_name}' path is not a file: {path}"
+        )
+
+
+def install_corpora(corpora):
 
     perplexity_dir.mkdir(parents=True, exist_ok=True)
-    wikitext_file = perplexity_dir / "wiki.test.raw"
+    print("\n> Installing corpora...")
 
-    if wikitext_file.exists():
-        return wikitext_file
+    for corpus in corpora:
+        name = corpus["name"]
+        source = corpus["source"]
+        local_path = perplexity_dir / f"{name}.txt"
 
-    url = "https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip"
-    zip_path = perplexity_dir / "wikitext-2-raw-v1.zip"
+        if local_path.exists() or local_path.is_symlink():
+            print(f"-> [{name}] already installed, skipping.")
+            continue
 
-    print("\n> Fetching perplexity corpus (wikitext-2-raw)...")
+        # local file
+        if not source.lower().startswith("http"):
+            src_path = Path(source).expanduser().resolve()
+            if src_path.suffix.lower() == ".zip":
+                _extract_zip_to(src_path, local_path, name)
+            else:
+                local_path.symlink_to(src_path)
+                print(f"-> [{name}] symlinked from {src_path}")
+            continue
+
+        # URL
+        is_zip = source.lower().endswith(".zip")
+        download_target = perplexity_dir / (f"{name}.zip" if is_zip else f"{name}.txt")
+
+        print(f"-> [{name}] downloading from {source}")
+        try:
+            subprocess.run(
+                ["wget", "-q", "--show-progress", "-O", str(download_target), source],
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            if download_target.exists():
+                download_target.unlink()
+            print(f"-> [{name}] FAILED to download from {source}")
+            continue
+
+        if is_zip:
+            _extract_zip_to(download_target, local_path, name)
+            download_target.unlink()
+        else:
+            print(f"-> [{name}] installed to {local_path.name}")
+
+
+def _extract_zip_to(zip_path, target_path, corpus_name):
+
     try:
-        subprocess.run(["wget", "-q", "--show-progress", "-O", str(zip_path), url], check=True)
         with zipfile.ZipFile(zip_path) as zf:
-            member = next(n for n in zf.namelist() if n.endswith("wiki.test.raw"))
-            with zf.open(member) as src, open(perplexity_dir / "wiki.test.raw", "wb") as dst:
+            candidates = [n for n in zf.namelist() if n.endswith((".raw", ".txt"))]
+            if not candidates:
+                print(f"-> [{corpus_name}] FAILED: no .raw or .txt file found in zip")
+                return
+            member = candidates[0]
+            with zf.open(member) as src, open(target_path, "wb") as dst:
                 dst.write(src.read())
+        print(f"-> [{corpus_name}] extracted {member} to {target_path.name}")
+    except (zipfile.BadZipFile, OSError) as e:
+        if target_path.exists():
+            target_path.unlink()
+        print(f"-> [{corpus_name}] FAILED to extract zip: {e}")
 
-    except (subprocess.CalledProcessError, zipfile.BadZipFile, StopIteration, OSError) as e:
-        print(f"\n> ERROR: Failed to fetch/extract wikitext corpus (perplexity will be skipped) [{e}]")
-        return None
 
-    return wikitext_file if wikitext_file.exists() else None
+def get_available_corpora(corpora):
+
+    available = []
+    for corpus in corpora:
+        name = corpus["name"]
+        local_path = perplexity_dir / f"{name}.txt"
+
+        if local_path.exists() or local_path.is_symlink():
+            corpus["local_path"] = local_path
+            available.append(corpus)
+
+    return available
