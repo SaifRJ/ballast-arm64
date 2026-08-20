@@ -60,3 +60,8 @@ metrics:
   - perplexity
   - kv_cache
   # - power_draw
+
+# Specify a corpus, or several, to test perplexity per model.
+corpora:
+  - name: wikitext-2
+    source: https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip
