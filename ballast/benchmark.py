@@ -100,19 +100,19 @@ def count_tokens(prompt_file):
     return max(1, round(word_count / 0.75))
 
 
-def create_run_outputs(run_id, engine_name):
+def create_run_outputs(run_timestamp, engine_name):
 
     return {
-        "performance": ensure_csv(run_id, PERFORMANCE_FIELDS, f"performance_{engine_name}.csv"),
-        "model_info": ensure_csv(run_id, MODEL_INFO_FIELDS, f"model_info_{engine_name}.csv"),
-        "perplexity": ensure_csv(run_id, PERPLEXITY_FIELDS, f"perplexity_{engine_name}.csv"),
-        "threads": ensure_csv(run_id, THREAD_FIELDS, f"thread_scaling_{engine_name}.csv"),
+        "performance": ensure_csv(run_timestamp, PERFORMANCE_FIELDS, f"performance_{engine_name}.csv"),
+        "model_info": ensure_csv(run_timestamp, MODEL_INFO_FIELDS, f"model_info_{engine_name}.csv"),
+        "perplexity": ensure_csv(run_timestamp, PERPLEXITY_FIELDS, f"perplexity_{engine_name}.csv"),
+        "threads": ensure_csv(run_timestamp, THREAD_FIELDS, f"thread_scaling_{engine_name}.csv"),
     }
 
 
-def ensure_csv(run_id, csv_fields, filename):
+def ensure_csv(run_timestamp, csv_fields, filename):
 
-    run_folder = results_dir / f"Benchmark_{run_id}"
+    run_folder = results_dir / f"Benchmark_{run_timestamp}"
     run_folder.mkdir(parents=True, exist_ok=True)
     csv_path = run_folder / filename
 
@@ -128,9 +128,9 @@ def append_row(csv_path, csv_fields, row_values):
         csv.writer(csv_file).writerow([row_values.get(field, "NA") for field in csv_fields])
 
 
-def snapshot_manifests(engines, run_id):
+def snapshot_manifests(engines, run_timestamp):
 
-    run_folder = results_dir / f"Benchmark_{run_id}"
+    run_folder = results_dir / f"Benchmark_{run_timestamp}"
     run_folder.mkdir(parents=True, exist_ok=True)
 
     for engine in engines:
@@ -376,9 +376,10 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, engine_name)
 
     return scaling
 
-def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, metrics, ram_cpu, kv):
+def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, metrics, ram_cpu, kv, run_id):
 
     append_row(csv_path, PERFORMANCE_FIELDS, {
+        "run_id": run_id,
         "timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine_name,
         "model": model["name"],
@@ -418,9 +419,10 @@ def record_model_info(csv_path, engine_name, model, metrics, kv):
     })
 
 
-def record_perplexity(csv_path, engine_name, model, corpus, perplexity):
+def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id):
 
     append_row(csv_path, PERPLEXITY_FIELDS, {
+        "run_id": run_id,
         "engine": engine_name,
         "model": model["name"],
         "corpus": corpus["name"],
@@ -429,10 +431,11 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity):
     })
 
 
-def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling):
+def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling, run_id):
 
     for threads, tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {
+            "run_id": run_id,
             "engine": engine_name,
             "model": model["name"],
             "prompt": prompt,
