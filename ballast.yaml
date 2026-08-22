@@ -38,7 +38,7 @@ run_settings:
   generated_tokens: 100
   repeats: 1
   prompts: [short, medium, long, very_long]
-  thread_scaling: auto        # auto | [1, 2, 4, 8] | false
+  thread_scaling: auto # auto | [1, 2, 4, 8] | false
 
 # llama.cpp CLI flags passed at inference time.
 runtime_flags:
@@ -50,15 +50,7 @@ runtime_flags:
 # Model meta data (n_layer, type_k, model_size_bytes, etc.) is always recorded.
 # Use 'all' to enable everything below.
 metrics:
-  - cpu_percent
-  - peak_ram_mb
-  - avg_ram_mb
-  - prefill_tps
-  - gen_tps
-  - ttft_ms
-  - perplexity
-  - kv_cache
-  # - power_draw
+  - all
 
 # Specify a corpus, or several, to test perplexity per model.
 corpora:
