@@ -76,7 +76,7 @@ def main():
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
             # fix todo: model metrics aren't defined until later in the loop, but model info only needs writing once per model 
-            bm.record_model_info(outputs["model_info"], engine_name, model, metrics, kv)
+            # bm.record_model_info(outputs["model_info"], engine_name, model, metrics, kv)
 
             for prompt in PROMPTS:
 
@@ -91,11 +91,12 @@ def main():
                 # Returns the number of tokens in the prompt file based on approx. 0.75 word/token ratio
                 prompt_tokens = bm.count_tokens(prompt_file)
 
-                # Measure thread throughput per model per prompt
-                scaling = bm.measure_thread_scaling(model["local_path"], prompt_tokens, thread_list, engine_name)
+                if thread_list:
+                    # Measure thread throughput per model per prompt
+                    scaling = bm.measure_thread_scaling(model["local_path"], prompt_tokens, thread_list, engine_name)
 
-                # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling)
+                    # Append thread scaling values to CSV file
+                    bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling)
 
                 for repeat_number in range(1, REPEATS + 1):
 

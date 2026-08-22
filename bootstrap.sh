@@ -12,7 +12,7 @@ echo ""
 echo "> Detecting OS platform..."
 case "$(uname -s)" in
     Linux*)
-        OS="linux"
+        OS="Linux"
         UPDATE="sudo apt-get update -qq"
         INSTALL="sudo apt-get install -y"
         PACKAGES="build-essential cmake git wget time python3 python3-pip python3-dev python3-venv libcurl4-openssl-dev"
@@ -68,5 +68,5 @@ echo " Ballast bootstrap complete."
 echo ""
 echo " Next steps:"
 echo " -> source .venv/bin/activate"
-echo " -> python3 main.py
+echo " -> python3 main.py"
 echo "=============================================="
