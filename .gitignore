@@ -3,7 +3,7 @@ raw_*.txt
 __pycache__/
 *.pyc
 *.pem
-config.txt
+config
 .venv/
 models/*
 engines/*

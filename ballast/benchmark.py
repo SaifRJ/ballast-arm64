@@ -131,6 +131,7 @@ def append_row(csv_path, csv_fields, row_values):
 def snapshot_manifests(engines, run_id):
 
     run_folder = results_dir / f"Benchmark_{run_id}"
+    run_folder.mkdir(parents=True, exist_ok=True)
 
     for engine in engines:
         name = engine["name"]
@@ -296,22 +297,21 @@ def compute_kv_cache(metrics, context_size, prompt_tokens, generated_tokens):
     return {"kv_alloc_mb": kv_alloc_mb, "kv_used_mb": kv_used_mb, "kv_utilisation": util}
 
 
-def measure_perplexity(model_path, chunk_count, engine_name):
+def measure_perplexity(model_path, corpus_path, chunks, engine_name):
 
     llama_perplexity = get_binary("llama-perplexity", engine_name)
 
-    wikitext_file = perplexity_dir / "wiki.test.raw" 
-
-    if not wikitext_file.exists():
-        print(f"\n> ERROR: Perplexity corpus not found at {wikitext_file}.")
+    if not corpus_path.exists():
+        print(f"\n> ERROR: Perplexity corpus not found at {corpus_path}.")
         return None
 
     command = [
         llama_perplexity,
         "-m", str(model_path),
-        "-f", str(wikitext_file),
-        "--chunks", str(chunk_count),
+        "-f", str(corpus_path),
     ]
+    if chunks != "all":
+        command.extend(["--chunks", str(chunks)])
 
     result = subprocess.run(command, capture_output=True, text=True, check=False)
 
@@ -320,19 +320,29 @@ def measure_perplexity(model_path, chunk_count, engine_name):
     return float(matches[-1]) if matches else None
 
 
-def get_thread_list(thread_cap):
-    max_threads = min(os.cpu_count() or 1, thread_cap)
-    thread_pairs = []
-    t = 1
+def get_thread_list(setting):
 
-    while t < max_threads:
-        thread_pairs.append(t)
-        t *= 2
+    if setting is False:
+        return []
 
-    if max_threads not in thread_pairs:
-        thread_pairs.append(max_threads)
+    if setting == "auto":
+        max_threads = os.cpu_count() or 1
+        threads = []
+        t = 1
+        while t < max_threads:
+            threads.append(t)
+            t *= 2
+        if max_threads not in threads:
+            threads.append(max_threads)
+        return threads
 
-    return thread_pairs
+    if isinstance(setting, list):
+        return setting
+
+    raise ValueError(
+        f"\n> Invalid thread_scaling value: {setting!r}"
+        f"\n-> Must be 'auto', a list of ints (e.g. [1, 2, 4, 8]), or false."
+    )
 
 
 def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, engine_name):
