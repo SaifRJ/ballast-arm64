@@ -1,4 +1,5 @@
-from ballast.config import engines_dir, results_dir, perplexity_dir, run_time
+from ballast.config import engines_dir, results_dir, run_time
+from llama_cpp import Llama
 from pathlib import Path
 import time
 import subprocess
@@ -16,7 +17,9 @@ import shutil
 
 PERFORMANCE_FIELDS = [
     # Run / workload
-    "timestamp",
+    "run_id",
+    "run_timestamp",
+    "measurement_timestamp",
     "engine",
     "model",
     "prompt",
@@ -41,34 +44,51 @@ PERFORMANCE_FIELDS = [
     "peak_ram_mb",
 
     # KV cache
+    "type_k",
+    "type_v",
     "kv_used_mb",
     "kv_utilisation",
 ]
 
 MODEL_INFO_FIELDS = [
     # Written once per (engine, model), static architecture metadata
+    "run_id",
+    "run_timestamp",
+    "measurement_timestamp",
     "engine",
     "model",
-    "model_size_bytes",
-    "model_n_params",
+    "architecture",
+    "context_length_trained",
+    "embedding_length",
     "n_layer",
+    "n_head",
     "n_head_kv",
-    "type_k",
-    "type_v",
+    "feed_forward_length",
+    "rope_freq_base",
+    "rope_dimension_count",
     "key_length",
     "value_length",
+    "model_size_bytes",
+    "model_n_params",
     "kv_alloc_mb",
 ]
 
 PERPLEXITY_FIELDS = [
+    "run_id",
+    "run_timestamp",
+    "measurement_timestamp",
     "engine",
     "model",
     "corpus",
     "chunks",
+    "ctx",
     "perplexity",
 ]
 
 THREAD_FIELDS = [
+    "run_id",
+    "run_timestamp",
+    "measurement_timestamp",
     "engine",
     "model",
     "prompt",
@@ -89,6 +109,52 @@ def get_binary(binary_name, engine_name):
         )
     
     return str(binary_path)
+
+
+def load_engine(engine_name, model_path, context_size, thread_count):
+
+    return Llama(
+        model_path=str(model_path),
+        n_ctx=context_size,
+        n_threads=thread_count,
+        verbose=False,
+    )
+
+
+def get_model_info(llm):
+  
+    meta = llm.metadata
+    arch = meta.get("general.architecture", "unknown")
+
+    def m(suffix, cast=str, default=None):
+        value = meta.get(f"{arch}.{suffix}")
+        if value is None:
+            return default
+        try:
+            return cast(value)
+        except (ValueError, TypeError):
+            return default
+
+    n_embd = llm.n_embd()
+    n_head = m("attention.head_count", int)
+    key_length = n_embd // n_head if n_head else None
+    value_length = key_length
+
+    return {
+        "architecture": arch,
+        "context_length_trained": m("context_length", int),
+        "embedding_length": n_embd,
+        "n_layer": m("block_count", int),
+        "n_head": n_head,
+        "n_head_kv": m("attention.head_count_kv", int),
+        "feed_forward_length": m("feed_forward_length", int),
+        "rope_freq_base": m("rope.freq_base", float),
+        "rope_dimension_count": m("rope.dimension_count", int),
+        "key_length": key_length,
+        "value_length": value_length,
+        "model_size_bytes": llama_model_size(llm._model.model),
+        "model_n_params": llama_model_n_params(llm._model.model),
+    }
 
 
 def get_thread_count():
@@ -282,11 +348,11 @@ def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_co
     return metrics
 
 
-def compute_kv_cache(metrics, context_size, prompt_tokens, generated_tokens):
+def compute_kv_cache(model_info, context_size, prompt_tokens, generated_tokens):
     try:
-        bytes_per_elem = 1 if metrics.get("type_k") == "q8_0" else 2
-        per_layer = (metrics["n_head_kv"] * metrics["key_length"] + metrics["n_head_kv"] * metrics["value_length"])
-        kv_alloc_mb = round(per_layer * metrics["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
+        bytes_per_elem = 1 if model_info.get("type_k") == "q8_0" else 2
+        per_layer = (model_info["n_head_kv"] * model_info["key_length"] + model_info["n_head_kv"] * model_info["value_length"])
+        kv_alloc_mb = round(per_layer * model_info["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
 
     except (KeyError, TypeError):
         return {"kv_alloc_mb": None, "kv_used_mb": None, "kv_utilisation": None}
@@ -345,7 +411,7 @@ def get_thread_list(setting):
     )
 
 
-def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, engine_name):
+def measure_thread_scaling(model_path, prompt_tokens, thread_list, engine_name):
 
     llama_bench = get_binary("llama-bench", engine_name)
 
@@ -354,7 +420,7 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_pairs, engine_name)
         "-m", str(model_path),
         "-p", str(prompt_tokens),
         "-n", "0",
-        "-t", ",".join(str(t) for t in thread_pairs),
+        "-t", ",".join(str(t) for t in thread_list),
         "-o", "csv",
     ]
 

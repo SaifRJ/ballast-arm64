@@ -67,7 +67,18 @@ def main():
 
         for model in models:
 
-            # Measure model perplexity per corpus provided
+            # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
+            llm = bm.load_engine(engine_name, model["local_path"], config["context_size"], thread_count)
+
+            # Retrieve a dict containing model metadata
+            model_info = bm.get_model_info(llm)
+
+            # Return KV-cache allocation per model
+            kv_alloc = bm.compute_kv_cache(model_info, CONTEXT_SIZE, prompt_tokens=0, gen_tokens=0)
+
+            # Append model info and architecture detail to model_info_{engine_name}.csv file output 
+            bm.record_model_info(outputs["model_info"], engine_name, model, model_info, metrics, kv_alloc, run_id, run_timestamp)
+
             for corpus in corpora:
 
                 # Measure perplexity per model per corpus
@@ -75,10 +86,6 @@ def main():
 
                 # Append ppl values to perplexity_{engine_name}.csv file output
                 bm.record_perplexity(outputs["perplexity"], engine_name, model, corpus, perplexity, run_id)
-
-            # Append model info and architecture detail to model_info_{engine_name}.csv file output 
-            # fix todo: model metrics aren't defined until later in the loop, but model info only needs writing once per model 
-            # bm.record_model_info(outputs["model_info"], engine_name, model, metrics, kv)
 
             for prompt in PROMPTS:
 
@@ -93,12 +100,11 @@ def main():
                 # Returns the number of tokens in the prompt file based on approx. 0.75 word/token ratio
                 prompt_tokens = bm.count_tokens(prompt_file)
 
-                if thread_list:
-                    # Measure thread throughput per model per prompt
-                    scaling = bm.measure_thread_scaling(model["local_path"], prompt_tokens, thread_list, engine_name)
+                # Measure thread throughput per model per prompt
+                scaling = bm.measure_thread_scaling(model["local_path"], prompt_tokens, thread_list, engine_name)
 
-                    # Append thread scaling values to CSV file
-                    bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling, run_id)
+                # Append thread scaling values to CSV file
+                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling, run_id)
 
                 for repeat_number in range(1, REPEATS + 1):
 
@@ -110,10 +116,10 @@ def main():
                     # Returns prompt-processing speed and token generation speed
                     metrics = bm.measure_bench_metrics(model["local_path"], prompt_tokens, GENERATED_TOKENS, thread_count, engine_name)
 
-                    kv = bm.compute_kv_cache(metrics, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
-
                     # Append performance metric values to performance_{engine_name}.csv file output
                     bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, GENERATED_TOKENS, metrics, ram_cpu, kv, run_id)
+
+                    del llm
                     
     # group by (config, model, prompt), mean/median across repeats
     # bm.compute_summary(run_timestamp)
