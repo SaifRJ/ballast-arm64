@@ -21,7 +21,7 @@ GENERATED_TOKENS = run["generated_tokens"]
 REPEATS = run["repeats"]
 THREAD_SCALING = run["thread_scaling"]
 PROMPTS = run["prompts"]
-CACHE_TYPE_K = runtime_flags.get("cache_type_k")   # None if unspecified → engine default
+CACHE_TYPE_K = runtime_flags.get("cache_type_k")
 CACHE_TYPE_V = runtime_flags.get("cache_type_v")
 
 def main():
@@ -72,7 +72,7 @@ def main():
         for model in models:
 
             # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
-            llm = bm.load_engine(engine_name, model["local_path"], config["context_size"], thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
+            llm = bm.load_engine(engine_name, model["local_path"], CONTEXT_SIZE, thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
 
             # Retrieve a dict containing model metadata
             model_info = bm.get_model_info(llm)
@@ -89,7 +89,7 @@ def main():
                 perplexity = bm.measure_perplexity(model["local_path"], corpus["local_path"], corpus["chunks"], engine_name)
 
                 # Append ppl values to perplexity_{engine_name}.csv file output
-                bm.record_perplexity(outputs["perplexity"], engine_name, model, corpus, perplexity, run_id)
+                bm.record_perplexity(outputs["perplexity"], engine_name, model, corpus, perplexity, CONTEXT_SIZE, run_id, run_timestamp)
 
             for prompt in PROMPTS:
 
@@ -108,14 +108,14 @@ def main():
                 scaling = bm.measure_thread_scaling(model["local_path"], prompt_tokens, thread_list, engine_name)
 
                 # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling, run_id)
+                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_tokens, scaling, run_id, run_timestamp)
+
+                # Compute how full the kv-cache is
+                kv_usage = bm.compute_kv_usage(kv_alloc, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
 
                 for repeat_number in range(1, REPEATS + 1):
 
                     print(f"\n> {model["name"]} / {prompt}: Repeat {repeat_number}/{REPEATS}")
-
-                    # Compute how full the kv-cache is
-                    kv_usage = bm.compute_kv_usage(kv_alloc, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
 
                     # Returns Peak RAM and CPU% for this model/prompt/repeat combination
                     ram_cpu = bm.measure_ram_cpu(model["local_path"], prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count, engine_name)

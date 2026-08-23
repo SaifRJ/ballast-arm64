@@ -1,5 +1,6 @@
 from ballast.config import engines_dir, results_dir, run_time
-from llama_cpp import llama_cpp, Llama
+import llama_cpp
+from llama_cpp import Llama, llama_model_size, llama_model_n_params
 from pathlib import Path
 import time
 import subprocess
@@ -516,11 +517,11 @@ def record_model_info(csv_path, engine_name, model, model_info, kv_alloc, run_id
         "value_length": model_info.get("value_length", "NA"),
         "model_size_bytes": model_info.get("model_size_bytes", "NA"),
         "model_n_params": model_info.get("model_n_params", "NA"),
-        "kv_alloc_mb": kv_alloc.get("kv_alloc_mb", "NA"),
+        "kv_alloc_mb": kv_alloc,
     })
 
 
-def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id, run_timestamp):
+def record_perplexity(csv_path, engine_name, model, corpus, perplexity, ctx, run_id, run_timestamp):
 
     append_row(csv_path, PERPLEXITY_FIELDS, {
         "run_id": run_id,
@@ -530,6 +531,7 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id, 
         "model": model["name"],
         "corpus": corpus["name"],
         "chunks": corpus["chunks"],
+        "ctx": ctx,
         "perplexity": perplexity if perplexity is not None else "NA"
     })
 
