@@ -43,7 +43,8 @@ run_settings:
 # llama.cpp CLI flags passed at inference time.
 runtime_flags:
   fa: 1
-  cache_type: q8_0
+  cache_type_k: q8_0
+  cache_type_v: null
   batch_size: 4096
 
 # What do you want to measure?

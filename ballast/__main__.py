@@ -13,12 +13,16 @@ run_id = str(uuid.uuid4())
 config = load_config()
 
 # Run config
+# todo: collapse run_settings and runtime_flags into one section
 run = config["run_settings"]
+runtime_flags = config["runtime_flags"]
 CONTEXT_SIZE = run["context_size"]
 GENERATED_TOKENS = run["generated_tokens"]
 REPEATS = run["repeats"]
 THREAD_SCALING = run["thread_scaling"]
 PROMPTS = run["prompts"]
+CACHE_TYPE_K = runtime_flags.get("cache_type_k")   # None if unspecified → engine default
+CACHE_TYPE_V = runtime_flags.get("cache_type_v")
 
 def main():
 
@@ -68,16 +72,16 @@ def main():
         for model in models:
 
             # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
-            llm = bm.load_engine(engine_name, model["local_path"], config["context_size"], thread_count)
+            llm = bm.load_engine(engine_name, model["local_path"], config["context_size"], thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
 
             # Retrieve a dict containing model metadata
             model_info = bm.get_model_info(llm)
 
             # Return KV-cache allocation per model
-            kv_alloc = bm.compute_kv_cache(model_info, CONTEXT_SIZE, prompt_tokens=0, gen_tokens=0)
+            kv_alloc = bm.compute_kv_alloc(model_info, CONTEXT_SIZE, CACHE_TYPE_K)
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
-            bm.record_model_info(outputs["model_info"], engine_name, model, model_info, metrics, kv_alloc, run_id, run_timestamp)
+            bm.record_model_info(outputs["model_info"], engine_name, model, model_info, kv_alloc, run_id, run_timestamp)
 
             for corpus in corpora:
 
@@ -110,6 +114,9 @@ def main():
 
                     print(f"\n> {model["name"]} / {prompt}: Repeat {repeat_number}/{REPEATS}")
 
+                    # Compute how full the kv-cache is
+                    kv_usage = bm.compute_kv_usage(kv_alloc, CONTEXT_SIZE, prompt_tokens, GENERATED_TOKENS)
+
                     # Returns Peak RAM and CPU% for this model/prompt/repeat combination
                     ram_cpu = bm.measure_ram_cpu(model["local_path"], prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count, engine_name)
 
@@ -117,9 +124,10 @@ def main():
                     metrics = bm.measure_bench_metrics(model["local_path"], prompt_tokens, GENERATED_TOKENS, thread_count, engine_name)
 
                     # Append performance metric values to performance_{engine_name}.csv file output
-                    bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, GENERATED_TOKENS, metrics, ram_cpu, kv, run_id)
+                    bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, GENERATED_TOKENS, metrics, ram_cpu, kv_usage, run_id)
 
-                    del llm
+            # Delete the llm object at the end of each model's loop to ensure a clean run per model
+            del llm
                     
     # group by (config, model, prompt), mean/median across repeats
     # bm.compute_summary(run_timestamp)

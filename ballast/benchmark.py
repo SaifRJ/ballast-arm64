@@ -1,5 +1,5 @@
 from ballast.config import engines_dir, results_dir, run_time
-from llama_cpp import Llama
+from llama_cpp import llama_cpp, Llama
 from pathlib import Path
 import time
 import subprocess
@@ -97,6 +97,17 @@ THREAD_FIELDS = [
     "prefill_tps",
 ]
 
+KV_TYPE_MAP = {
+    "f16":  llama_cpp.GGML_TYPE_F16,
+    "f32":  llama_cpp.GGML_TYPE_F32,
+    "q8_0": llama_cpp.GGML_TYPE_Q8_0,
+    "q4_0": llama_cpp.GGML_TYPE_Q4_0,
+    "q4_1": llama_cpp.GGML_TYPE_Q4_1,
+    "q5_0": llama_cpp.GGML_TYPE_Q5_0,
+    "q5_1": llama_cpp.GGML_TYPE_Q5_1,
+    "q8_1": llama_cpp.GGML_TYPE_Q8_1,
+}
+
 def get_binary(binary_name, engine_name):
 
     binary_path = engines_dir / engine_name / "build" / "bin" / binary_name
@@ -111,14 +122,20 @@ def get_binary(binary_name, engine_name):
     return str(binary_path)
 
 
-def load_engine(engine_name, model_path, context_size, thread_count):
+def load_engine(engine_name, model_path, context_size, thread_count, cache_type_k=None, cache_type_v=None):
 
-    return Llama(
-        model_path=str(model_path),
-        n_ctx=context_size,
-        n_threads=thread_count,
-        verbose=False,
-    )
+    kwargs = {
+        "model_path": str(model_path),
+        "n_ctx": context_size,
+        "n_threads": thread_count,
+        "verbose": False,
+    }
+    if cache_type_k is not None:
+        kwargs["type_k"] = KV_TYPE_MAP[cache_type_k]
+    if cache_type_v is not None:
+        kwargs["type_v"] = KV_TYPE_MAP[cache_type_v]
+
+    return Llama(**kwargs)
 
 
 def get_model_info(llm):
@@ -348,19 +365,28 @@ def measure_bench_metrics(model_path, prompt_tokens, generated_tokens, thread_co
     return metrics
 
 
-def compute_kv_cache(model_info, context_size, prompt_tokens, generated_tokens):
+def compute_kv_alloc(model_info, context_size, cache_type_k=None):
     try:
-        bytes_per_elem = 1 if model_info.get("type_k") == "q8_0" else 2
+        bytes_per_elem = 1 if cache_type_k == "q8_0" else 2
         per_layer = (model_info["n_head_kv"] * model_info["key_length"] + model_info["n_head_kv"] * model_info["value_length"])
         kv_alloc_mb = round(per_layer * model_info["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
 
     except (KeyError, TypeError):
-        return {"kv_alloc_mb": None, "kv_used_mb": None, "kv_utilisation": None}
+        return None
 
-    util = round((prompt_tokens + generated_tokens) / context_size, 4) if context_size else None
-    kv_used_mb = round(kv_alloc_mb * util, 2) if (kv_alloc_mb and util) else None
+    return kv_alloc_mb
 
-    return {"kv_alloc_mb": kv_alloc_mb, "kv_used_mb": kv_used_mb, "kv_utilisation": util}
+
+def compute_kv_usage(kv_alloc_mb, context_size, prompt_tokens, generated_tokens):
+
+    if not context_size or kv_alloc_mb is None:
+        return {"kv_used_mb": None, "kv_utilisation": None}
+
+
+    util = round((prompt_tokens + generated_tokens) / context_size, 4)
+    kv_used_mb = round(kv_alloc_mb * util, 2)
+
+    return {"kv_used_mb": kv_used_mb, "kv_utilisation": util}
 
 
 def measure_perplexity(model_path, corpus_path, chunks, engine_name):
@@ -442,11 +468,12 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_list, engine_name):
 
     return scaling
 
-def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, metrics, ram_cpu, kv, run_id):
+def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, metrics, ram_cpu, kv_usage, run_id, run_timestamp):
 
     append_row(csv_path, PERFORMANCE_FIELDS, {
         "run_id": run_id,
-        "timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
+        "run_timestamp": run_timestamp,
+        "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine_name,
         "model": model["name"],
         "prompt": prompt,
@@ -463,32 +490,42 @@ def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx,
         "cpu_pct": ram_cpu.get("cpu_pct", "NA"),
         "avg_ram_mb": ram_cpu.get("avg_ram_mb", "NA"),
         "peak_ram_mb": ram_cpu.get("peak_ram_mb", "NA"),
-        "kv_used_mb": kv.get("kv_used_mb", "NA"),
-        "kv_utilisation": kv.get("kv_utilisation", "NA")
+        "kv_used_mb": kv_usage.get("kv_used_mb", "NA"),
+        "kv_utilisation": kv_usage.get("kv_utilisation", "NA")
     })
 
 
-def record_model_info(csv_path, engine_name, model, metrics, kv):
+def record_model_info(csv_path, engine_name, model, model_info, kv_alloc, run_id, run_timestamp):
 
     append_row(csv_path, MODEL_INFO_FIELDS, {
+        "run_id": run_id,
+        "run_timestamp": run_timestamp,
+        "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine_name,
         "model": model["name"],
-        "model_size_bytes": metrics.get("model_size_bytes", "NA"),
-        "model_n_params": metrics.get("model_n_params", "NA"),
-        "n_layer": metrics.get("n_layer", "NA"),
-        "n_head_kv": metrics.get("n_head_kv", "NA"),
-        "type_k": metrics.get("type_k", "NA"),
-        "type_v": metrics.get("type_v", "NA"),
-        "key_length": metrics.get("key_length", "NA"),
-        "value_length": metrics.get("value_length", "NA"),
-        "kv_alloc_mb": kv.get("kv_alloc_mb", "NA")
+        "architecture": model_info.get("architecture", "NA"),
+        "context_length_trained": model_info.get("context_length_trained", "NA"),
+        "embedding_length": model_info.get("embedding_length", "NA"),
+        "n_layer": model_info.get("n_layer", "NA"),
+        "n_head": model_info.get("n_head", "NA"),
+        "n_head_kv": model_info.get("n_head_kv", "NA"),
+        "feed_forward_length": model_info.get("feed_forward_length", "NA"),
+        "rope_freq_base": model_info.get("rope_freq_base", "NA"),
+        "rope_dimension_count": model_info.get("rope_dimension_count", "NA"),
+        "key_length": model_info.get("key_length", "NA"),
+        "value_length": model_info.get("value_length", "NA"),
+        "model_size_bytes": model_info.get("model_size_bytes", "NA"),
+        "model_n_params": model_info.get("model_n_params", "NA"),
+        "kv_alloc_mb": kv_alloc.get("kv_alloc_mb", "NA"),
     })
 
 
-def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id):
+def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id, run_timestamp):
 
     append_row(csv_path, PERPLEXITY_FIELDS, {
         "run_id": run_id,
+        "run_timestamp": run_timestamp,
+        "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine_name,
         "model": model["name"],
         "corpus": corpus["name"],
@@ -497,11 +534,13 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity, run_id):
     })
 
 
-def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling, run_id):
+def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling, run_id, run_timestamp):
 
     for threads, tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {
             "run_id": run_id,
+            "run_timestamp": run_timestamp,
+            "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
             "engine": engine_name,
             "model": model["name"],
             "prompt": prompt,
