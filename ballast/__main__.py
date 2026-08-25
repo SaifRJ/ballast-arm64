@@ -81,7 +81,7 @@ def main():
             model_info = bm.get_model_info(llm)
 
             # Return KV-cache allocation per model
-            kv_alloc = bm.compute_kv_alloc(model_info, CONTEXT_SIZE, CACHE_TYPE_K)
+            kv_alloc = bm.compute_kv_alloc(model_info, CONTEXT_SIZE, CACHE_TYPE_K, CACHE_TYPE_V)
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
             bm.record_model_info(outputs["model_info"], engine_name, model, model_info, kv_alloc, run_id, run_timestamp)

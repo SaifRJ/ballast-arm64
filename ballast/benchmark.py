@@ -1,6 +1,6 @@
 from ballast.config import engines_dir, results_dir, run_time
 import llama_cpp
-from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context, llama_perf_context_reset
+from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context, llama_perf_context_reset, llama_memory_clear, llama_get_memory
 from pathlib import Path
 import time
 import subprocess
@@ -99,14 +99,26 @@ THREAD_FIELDS = [
 ]
 
 KV_TYPE_MAP = {
-    "f16":  llama_cpp.GGML_TYPE_F16,
-    "f32":  llama_cpp.GGML_TYPE_F32,
+    "f16": llama_cpp.GGML_TYPE_F16,
+    "f32": llama_cpp.GGML_TYPE_F32,
     "q8_0": llama_cpp.GGML_TYPE_Q8_0,
     "q4_0": llama_cpp.GGML_TYPE_Q4_0,
     "q4_1": llama_cpp.GGML_TYPE_Q4_1,
     "q5_0": llama_cpp.GGML_TYPE_Q5_0,
     "q5_1": llama_cpp.GGML_TYPE_Q5_1,
-    "q8_1": llama_cpp.GGML_TYPE_Q8_1,
+    "q8_1": llama_cpp.GGML_TYPE_Q8_1
+}
+
+_BYTES_PER_ELEM = {
+    "f32": 4.0,
+    "f16": 2.0,
+    "bf16": 2.0,
+    "q8_0": 1.0,
+    "q5_0": 0.625,
+    "q5_1": 0.6875,
+    "q4_0": 0.5625,
+    "q4_1": 0.625,
+    "iq4_nl": 0.5625
 }
 
 def get_binary(binary_name, engine_name):
@@ -148,7 +160,8 @@ def warmup_engine(llm):
         token = llm.sample()
         llm.eval([token])
 
-    llm.reset()
+    llama_memory_clear(llama_get_memory(llm.ctx), True)
+    llama_perf_context_reset(llm.ctx)
 
 
 def get_model_info(llm):
@@ -301,7 +314,7 @@ def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thr
 
 def measure_prefill(llm, prompt_tokens):
 
-    llm.reset()
+    llama_memory_clear(llama_get_memory(llm.ctx), True)
     llama_perf_context_reset(llm.ctx)
 
     llm.eval(prompt_tokens)
@@ -320,12 +333,11 @@ def measure_prefill(llm, prompt_tokens):
 
 def measure_generation(llm, prompt_tokens, n_generated_tokens):
 
-    llm.reset()
+    llama_memory_clear(llama_get_memory(llm.ctx), True)
     llama_perf_context_reset(llm.ctx)
 
-    llm.eval(prompt_tokens)
-
     ttft_start = time.perf_counter_ns()
+    llm.eval(prompt_tokens)
     first_token = llm.sample()
     ttft_end = time.perf_counter_ns()
     llm.eval([first_token])
@@ -347,11 +359,17 @@ def measure_generation(llm, prompt_tokens, n_generated_tokens):
     return {"gen_tps": gen_tps, "ttft_ms": ttft_ms}
 
 
-def compute_kv_alloc(model_info, context_size, cache_type_k=None):
+def compute_kv_alloc(model_info, context_size, cache_type_k, cache_type_v):
     try:
-        bytes_per_elem = 1 if cache_type_k == "q8_0" else 2
-        per_layer = (model_info["n_head_kv"] * model_info["key_length"] + model_info["n_head_kv"] * model_info["value_length"])
-        kv_alloc_mb = round(per_layer * model_info["n_layer"] * context_size * bytes_per_elem / (1024**2), 2)
+
+        bpe_k = _BYTES_PER_ELEM.get(cache_type_k or "f16", 2.0)
+        bpe_v = _BYTES_PER_ELEM.get(cache_type_v or "f16", 2.0)
+
+        k_bytes = model_info["n_head_kv"] * model_info["key_length"] * bpe_k
+        v_bytes = model_info["n_head_kv"] * model_info["value_length"] * bpe_v
+        per_layer = k_bytes + v_bytes
+    
+        kv_alloc_mb = round(per_layer * model_info["n_layer"] * context_size / (1024**2), 2)
 
     except (KeyError, TypeError):
         return None
