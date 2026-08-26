@@ -1,6 +1,6 @@
-from ballast.config import engines_dir, results_dir, run_time
+from ballast.config import engines_dir, results_dir, _BYTES_PER_ELEM, run_time
 import llama_cpp
-from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context, llama_perf_context_reset, llama_memory_clear, llama_get_memory
+from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context, llama_perf_context_reset, llama_memory_clear, llama_get_memory # type: ignore
 from pathlib import Path
 import time
 import subprocess
@@ -10,6 +10,7 @@ import os
 import re
 import psutil
 import shutil
+import logging
 
 # benchmark.py: contains all logic for the Arm64 LLM benchmark harness
 # This file holds every worker function that returns a performance metric, file path helpers, or CSV outputs
@@ -121,6 +122,8 @@ _BYTES_PER_ELEM = {
     "iq4_nl": 0.5625
 }
 
+log = logging.getLogger("ballast")
+
 def get_binary(binary_name, engine_name):
 
     binary_path = engines_dir / engine_name / "build" / "bin" / binary_name
@@ -229,8 +232,7 @@ def ensure_csv(run_timestamp, csv_fields, filename):
 def append_row(csv_path, csv_fields, row_values):
 
     with open(csv_path, "a", newline="") as csv_file:
-        csv.writer(csv_file).writerow([row_values.get(field, "NA") for field in csv_fields])
-
+        csv.writer(csv_file).writerow(["NA" if row_values.get(field) is None else row_values.get(field) for field in csv_fields])
 
 def snapshot_manifests(engines, run_timestamp):
 
@@ -468,7 +470,7 @@ def measure_thread_scaling(model_path, prompt_tokens, thread_list, engine_name):
 
     return scaling
 
-def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp):
+def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp, type_k, type_v):
 
     append_row(csv_path, PERFORMANCE_FIELDS, {
         "run_id": run_id,
@@ -480,18 +482,20 @@ def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx,
         "ctx": ctx,
         "threads": threads,
         "repeat": repeat_number,
-        "prefill_tps": prefill_metrics.get("prefill_tps", "NA"),
-        "prefill_ms": prefill_metrics.get("prefill_ms", "NA"),
-        # "prefill_tps_stddev": metrics.get("prefill_tps_stddev", "NA"),
+        "prefill_tps": prefill_metrics.get("prefill_tps"),
+        "prefill_ms": prefill_metrics.get("prefill_ms"),
+        # "prefill_tps_stddev": metrics.get("prefill_tps_stddev"),
         "gen_tokens": gen_tokens,
-        "gen_tps": generation_metrics.get("gen_tps", "NA"),
-        # "gen_tps_stddev": .get("gen_tps_stddev", "NA"),
-        "ttft_ms": generation_metrics.get("ttft_ms", "NA"),
-        "cpu_pct": ram_cpu.get("cpu_pct", "NA"),
-        "avg_ram_mb": ram_cpu.get("avg_ram_mb", "NA"),
-        "peak_ram_mb": ram_cpu.get("peak_ram_mb", "NA"),
-        "kv_used_mb": kv_usage.get("kv_used_mb", "NA"),
-        "kv_utilisation": kv_usage.get("kv_utilisation", "NA")
+        "gen_tps": generation_metrics.get("gen_tps"),
+        # "gen_tps_stddev": .get("gen_tps_stddev"),
+        "ttft_ms": generation_metrics.get("ttft_ms"),
+        "cpu_pct": ram_cpu.get("cpu_pct"),
+        "avg_ram_mb": ram_cpu.get("avg_ram_mb"),
+        "peak_ram_mb": ram_cpu.get("peak_ram_mb"),
+        "type_k": type_k,
+        "type_v": type_v,
+        "kv_used_mb": kv_usage.get("kv_used_mb"),
+        "kv_utilisation": kv_usage.get("kv_utilisation")
     })
 
 
@@ -503,20 +507,20 @@ def record_model_info(csv_path, engine_name, model, model_info, kv_alloc, run_id
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine_name,
         "model": model["name"],
-        "architecture": model_info.get("architecture", "NA"),
-        "context_length_trained": model_info.get("context_length_trained", "NA"),
-        "embedding_length": model_info.get("embedding_length", "NA"),
-        "n_layer": model_info.get("n_layer", "NA"),
-        "n_head": model_info.get("n_head", "NA"),
-        "n_head_kv": model_info.get("n_head_kv", "NA"),
-        "feed_forward_length": model_info.get("feed_forward_length", "NA"),
-        "rope_freq_base": model_info.get("rope_freq_base", "NA"),
-        "rope_dimension_count": model_info.get("rope_dimension_count", "NA"),
-        "key_length": model_info.get("key_length", "NA"),
-        "value_length": model_info.get("value_length", "NA"),
-        "model_size_bytes": model_info.get("model_size_bytes", "NA"),
-        "model_n_params": model_info.get("model_n_params", "NA"),
-        "kv_alloc_mb": kv_alloc,
+        "architecture": model_info.get("architecture"),
+        "context_length_trained": model_info.get("context_length_trained"),
+        "embedding_length": model_info.get("embedding_length"),
+        "n_layer": model_info.get("n_layer"),
+        "n_head": model_info.get("n_head"),
+        "n_head_kv": model_info.get("n_head_kv"),
+        "feed_forward_length": model_info.get("feed_forward_length"),
+        "rope_freq_base": model_info.get("rope_freq_base"),
+        "rope_dimension_count": model_info.get("rope_dimension_count"),
+        "key_length": model_info.get("key_length"),
+        "value_length": model_info.get("value_length"),
+        "model_size_bytes": model_info.get("model_size_bytes"),
+        "model_n_params": model_info.get("model_n_params"),
+        "kv_alloc_mb": kv_alloc
     })
 
 
@@ -531,7 +535,7 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity, ctx, run
         "corpus": corpus["name"],
         "chunks": corpus["chunks"],
         "ctx": ctx,
-        "perplexity": perplexity if perplexity is not None else "NA"
+        "perplexity": perplexity
     })
 
 
