@@ -1,16 +1,14 @@
-from ballast.config import load_config, prompts_dir
+from ballast.config import load_config, init_run, run_id, run_timestamp, prompts_dir
 import ballast.benchmark as bm
 import ballast.install as inst
-import uuid
 
 # main.py: orchestration for the Arm64 LLM benchmarking pipeline
 # Manages code orchestration and the core benchmarking loop
 # All functions live in benchmark.py, main.py only decides what runs and in what order
 
 start_time = bm.run_time()
-run_timestamp = (bm.run_time()).strftime("%Y-%m-%d_%H-%M")
-run_id = str(uuid.uuid4())
 config = load_config()
+log = init_run()
 
 # Run config
 # todo: collapse run_settings and runtime_flags into one section
@@ -136,7 +134,9 @@ def main():
                     kv_usage = bm.read_kv_usage(llm, kv_alloc, CONTEXT_SIZE)
 
                     # Append performance metric values to performance_{engine_name}.csv file output
-                    bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, GENERATED_TOKENS, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
+                    bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, 
+                                          GENERATED_TOKENS, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp, 
+                                          type_k=CACHE_TYPE_K or "f16", type_v=CACHE_TYPE_V or "f16")
 
             # Delete the llm object at the end of each model's loop to ensure a clean run per model
             del llm

@@ -7,7 +7,9 @@ import shutil
 import zipfile
 import json
 import os
+import logging
 
+log = logging.getLogger("ballast")
 
 def validate_engine_entries(engines):
 
