@@ -1,4 +1,5 @@
 from ballast.config import load_config, init_run, run_id, run_timestamp, prompts_dir
+from ballast.sampler import ResourceSampler
 import ballast.benchmark as bm
 import ballast.install as inst
 

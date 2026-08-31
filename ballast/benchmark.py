@@ -29,6 +29,7 @@ PERFORMANCE_FIELDS = [
     "ctx",
     "threads",
     "repeat",
+    "sample_count",
 
     # Prefill performance
     "prefill_tps",
@@ -111,6 +112,7 @@ SAMPLES_FIELDS = {
     "phase",
     "rss_mb",
     "cpu_pct"
+    "sample_count"
 }
 
 KV_TYPE_MAP = {
@@ -439,6 +441,7 @@ def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx,
         "ctx": ctx,
         "threads": threads,
         "repeat": repeat_number,
+        "sample_count": ram_cpu.get("sample_count"),
         "prefill_tps": prefill_metrics.get("prefill_tps"),
         "prefill_ms": prefill_metrics.get("prefill_ms"),
         # "prefill_tps_stddev": metrics.get("prefill_tps_stddev"),

@@ -16,7 +16,7 @@ log = logging.getLogger("ballast")
 
 class ResourceSampler:
 
-    def __init__(self, csv_path, pid=None, interval_ms=100, mode="snapshot", tag=None):
+    def __init__(self, pid=None, interval_ms=100, mode="snapshot", csv_path=None, tag=None):
 
         self.pid = pid if pid is not None else os.getpid()
         self.interval_s = interval_ms / 1000.0
@@ -44,11 +44,13 @@ class ResourceSampler:
         self._proc.cpu_percent(interval=None)
 
         if self.mode == "sampled":
-            self._csv_file = open(self.csv_path, "a", newline="")
-            self._csv_writer = csv.writer(self._csv_file)
-            
-            if self.csv_path.stat().st_size == 0:
-                self._csv_writer.writerow(["timestamp_ns", "tag", "rss_mb", "cpu_pct"])
+            if self.csv_path is None:
+                log.warning("sampled mode without csv_path, samples will be discarded.")
+            else:
+                self._csv_file = open(self.csv_path, "a", newline="")
+                self._csv_writer = csv.writer(self._csv_file)
+                if self.csv_path.stat().st_size == 0:
+                    self._csv_writer.writerow(["timestamp_ns", "tag", "rss_mb", "cpu_pct"])
 
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -84,7 +86,7 @@ class ResourceSampler:
 
         if not self._samples:
             log.warning("ResourceSampler: no samples collected")
-            return {"peak_ram_mb": None, "avg_ram_mb": None, "cpu_pct": None}
+            return {"peak_ram_mb": None, "avg_ram_mb": None, "cpu_pct": None, "sample_count": 0}
 
         rss_values = [s[1] for s in self._samples]
         cpu_values = [s[2] for s in self._samples if s[2] > 0]  # drop priming zeros
@@ -93,4 +95,5 @@ class ResourceSampler:
             "peak_ram_mb": round(max(rss_values) / (1024**2), 2),
             "avg_ram_mb": round((sum(rss_values) / len(rss_values)) / (1024**2), 2),
             "cpu_pct": round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else 0,
+            "sample_count": len(self._samples)
         }
