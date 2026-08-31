@@ -93,10 +93,10 @@ THREAD_FIELDS = [
     "measurement_timestamp",
     "engine",
     "model",
-    "prompt",
-    "prompt_tokens",
+    "thread_scaling_tokens",
     "threads",
     "prefill_tps",
+    "gen_tps"
 ]
 
 KV_TYPE_MAP = {
@@ -138,14 +138,16 @@ def get_binary(binary_name, engine_name):
     return str(binary_path)
 
 
-def load_engine(engine_name, model_path, context_size, thread_count, cache_type_k=None, cache_type_v=None):
+def load_engine(model_path, context_size, thread_count, cache_type_k=None, cache_type_v=None):
 
     kwargs = {
         "model_path": str(model_path),
         "n_ctx": context_size,
         "n_threads": thread_count,
+        "n_threads_batch": thread_count,
         "verbose": False,
     }
+
     if cache_type_k is not None:
         kwargs["type_k"] = KV_TYPE_MAP[cache_type_k]
     if cache_type_v is not None:
@@ -316,20 +318,24 @@ def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thr
 
 def measure_prefill(llm, prompt_tokens):
 
+    llm.reset()
     llama_memory_clear(llama_get_memory(llm.ctx), True)
-    llama_perf_context_reset(llm.ctx)
 
+    n_prefill = len(prompt_tokens)
+    if n_prefill == 0:
+        log.warning("measure_prefill skipped empty prompt.")
+        return {"prefill_tps": None, "prefill_ms": None}
+
+    start = time.perf_counter_ns()
     llm.eval(prompt_tokens)
+    end = time.perf_counter_ns()
 
-    perf = llama_perf_context(llm.ctx)
-    prefill_ms = perf.t_p_eval_ms
-    n_prefill = perf.n_p_eval
-
-    if n_prefill == 0 or prefill_ms == 0:
+    prefill_ms = (end - start) / 1_000_000
+    if prefill_ms == 0:
+        log.warning(f"measure_prefill got zero elapsed time ({n_prefill} tokens).")
         return {"prefill_tps": None, "prefill_ms": None}
 
     prefill_tps = round(n_prefill / (prefill_ms / 1000), 6)
-
     return {"prefill_tps": prefill_tps, "prefill_ms": round(prefill_ms, 3)}
 
 
@@ -439,36 +445,28 @@ def get_thread_list(setting):
     )
 
 
-def measure_thread_scaling(model_path, prompt_tokens, thread_list, engine_name):
+def measure_thread_scaling(model_path, thread_list, context_size, generated_tokens, thread_scaling_tokens=512, cache_type_k=None, cache_type_v=None, engine_name="default"):
 
-    llama_bench = get_binary("llama-bench", engine_name)
-
-    command = [
-        llama_bench,
-        "-m", str(model_path),
-        "-p", str(prompt_tokens),
-        "-n", "0",
-        "-t", ",".join(str(t) for t in thread_list),
-        "-o", "csv",
-    ]
-
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-
-    csv_lines = [line for line in result.stdout.splitlines() if line.strip()]
     scaling = []
-    if not csv_lines:
-        return scaling
+    for threads in thread_list:
+        log.info(f"thread_scaling: threads={threads}")
+        llm = load_engine(model_path, context_size, threads, cache_type_k, cache_type_v)
+        warmup_engine(llm)
 
-    reader = csv.DictReader(csv_lines)
-    for row in reader:
-        try:
-            threads = int(row.get("n_threads", 0) or 0)
-            tps = float(row["avg_ts"])
-            scaling.append((threads, tps))
-        except (ValueError, KeyError):
-            continue
+        # Synthesise scaling prompt from a reference string
+        ref = llm.tokenize(b"The quick brown fox jumps over the lazy dog.")
+        while len(ref) < thread_scaling_tokens:
+            ref = ref + ref
+        scaling_tokens = ref[:thread_scaling_tokens]
+
+        prefill = measure_prefill(llm, scaling_tokens)
+        generation = measure_generation(llm, scaling_tokens, generated_tokens)
+        del llm
+
+        scaling.append((threads, prefill.get("prefill_tps"), generation.get("gen_tps")))
 
     return scaling
+
 
 def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp, type_k, type_v):
 
@@ -539,17 +537,16 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity, ctx, run
     })
 
 
-def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling, run_id, run_timestamp):
-
-    for threads, tps in scaling:
+def record_thread_scaling(csv_path, engine_name, model, thread_scaling_tokens, scaling, run_id, run_timestamp):
+    for threads, prefill_tps, gen_tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {
             "run_id": run_id,
             "run_timestamp": run_timestamp,
             "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
             "engine": engine_name,
             "model": model["name"],
-            "prompt": prompt,
-            "prompt_tokens": prompt_tokens,
+            "thread_scaling_tokens": thread_scaling_tokens,
             "threads": threads,
-            "prefill_tps": tps
+            "prefill_tps": prefill_tps,
+            "gen_tps": gen_tps
         })

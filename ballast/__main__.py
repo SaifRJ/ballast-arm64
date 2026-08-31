@@ -18,6 +18,7 @@ CONTEXT_SIZE = run["context_size"]
 GENERATED_TOKENS = run["generated_tokens"]
 REPEATS = run["repeats"]
 THREAD_SCALING = run["thread_scaling"]
+THREAD_SCALING_TOKENS = run["thread_scaling_prompt_tokens"]
 PROMPTS = run["prompts"]
 CACHE_TYPE_K = runtime_flags.get("cache_type_k")
 CACHE_TYPE_V = runtime_flags.get("cache_type_v")
@@ -70,7 +71,7 @@ def main():
         for model in models:
 
             # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
-            llm = bm.load_engine(engine_name, model["local_path"], CONTEXT_SIZE, thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
+            llm = bm.load_engine(model["local_path"], CONTEXT_SIZE, thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
 
             # Run a small inference to avoid first-call cost from affecting measurements
             bm.warmup_engine(llm) 
@@ -83,6 +84,12 @@ def main():
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
             bm.record_model_info(outputs["model_info"], engine_name, model, model_info, kv_alloc, run_id, run_timestamp)
+
+             # Measure thread throughput per model per prompt
+            scaling = bm.measure_thread_scaling(model["local_path"], thread_list, CONTEXT_SIZE, GENERATED_TOKENS, THREAD_SCALING_TOKENS, CACHE_TYPE_K, CACHE_TYPE_V, engine_name)
+
+            # Append thread scaling values to CSV file
+            bm.record_thread_scaling(outputs["threads"], engine_name, model, THREAD_SCALING_TOKENS, scaling, run_id, run_timestamp)
 
             for corpus in corpora:
 
@@ -109,13 +116,7 @@ def main():
                 prompt_token_ids = bm.tokenize_prompt(llm, prompt_text)
 
                 # Compute number of tokens
-                n_prompt = len(prompt_token_ids)
-
-                # Measure thread throughput per model per prompt
-                scaling = bm.measure_thread_scaling(model["local_path"], n_prompt, thread_list, engine_name)
-
-                # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_token_ids, scaling, run_id, run_timestamp)
+                n_prompt_tokens = len(prompt_token_ids)
 
                 for repeat_number in range(1, REPEATS + 1):
 
