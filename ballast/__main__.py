@@ -1,4 +1,5 @@
 from ballast.config import load_config, init_run, run_id, run_timestamp, prompts_dir
+from ballast.sampler import ResourceSampler
 import ballast.benchmark as bm
 import ballast.install as inst
 
@@ -14,6 +15,7 @@ log = init_run()
 # todo: collapse run_settings and runtime_flags into one section
 run = config["run_settings"]
 runtime_flags = config["runtime_flags"]
+MODE = config["mode"]
 CONTEXT_SIZE = run["context_size"]
 GENERATED_TOKENS = run["generated_tokens"]
 REPEATS = run["repeats"]
@@ -66,7 +68,7 @@ def main():
         engine_name = engine["name"]
 
         # Create all output CSVs for this engine
-        outputs = bm.create_run_outputs(run_timestamp, engine_name)
+        outputs = bm.create_run_outputs(run_timestamp, engine_name, sampling_mode=MODE)
 
         for model in models:
 
@@ -122,15 +124,17 @@ def main():
 
                     print(f"\n> {model["name"]} / {prompt}: Repeat {repeat_number}/{REPEATS}")
 
-                    # Returns Peak RAM and CPU% for this model/prompt/repeat combination
-                    ram_cpu = bm.measure_ram_cpu(model["local_path"], prompt_file, CONTEXT_SIZE, GENERATED_TOKENS, thread_count, engine_name)
+                    with ResourceSampler(interval_ms=100, mode="snapshot") as sampler:
 
-                    # Measure prefill/s
-                    prefill_metrics = bm.measure_prefill(llm, prompt_token_ids)
+                        # Measure prefill/s
+                        prefill_metrics = bm.measure_prefill(llm, prompt_token_ids) 
+            
+                        # Measure token generation/s
+                        generation_metrics = bm.measure_generation(llm, prompt_token_ids, GENERATED_TOKENS)
 
-                    # Measure token generation/s
-                    generation_metrics = bm.measure_generation(llm, prompt_token_ids, GENERATED_TOKENS)
-
+                    # Measure RAM/CPU usage via PID sampler
+                    ram_cpu = sampler.aggregate()
+                    
                     # Read how full the kv-cache is
                     kv_usage = bm.read_kv_usage(llm, kv_alloc, CONTEXT_SIZE)
 

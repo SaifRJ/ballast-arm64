@@ -1,4 +1,5 @@
 from ballast.config import engines_dir, results_dir, _BYTES_PER_ELEM, run_time
+from ballast.sampler import ResourceSampler
 import llama_cpp
 from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context, llama_perf_context_reset, llama_memory_clear, llama_get_memory # type: ignore
 from pathlib import Path
@@ -28,6 +29,7 @@ PERFORMANCE_FIELDS = [
     "ctx",
     "threads",
     "repeat",
+    "sample_count",
 
     # Prefill performance
     "prefill_tps",
@@ -98,6 +100,20 @@ THREAD_FIELDS = [
     "prefill_tps",
     "gen_tps"
 ]
+
+SAMPLES_FIELDS = {
+    "run_id",
+    "run_timestamp",
+    "sample_timestamp_ns",
+    "engine",
+    "model",
+    "prompt",
+    "repeat",
+    "phase",
+    "rss_mb",
+    "cpu_pct"
+    "sample_count"
+}
 
 KV_TYPE_MAP = {
     "f16": llama_cpp.GGML_TYPE_F16,
@@ -209,14 +225,19 @@ def get_thread_count():
     return os.cpu_count()
 
 
-def create_run_outputs(run_timestamp, engine_name):
+def create_run_outputs(run_timestamp, engine_name, sampling_mode="snapshot"):
 
-    return {
+    outputs = {
         "performance": ensure_csv(run_timestamp, PERFORMANCE_FIELDS, f"performance_{engine_name}.csv"),
         "model_info": ensure_csv(run_timestamp, MODEL_INFO_FIELDS, f"model_info_{engine_name}.csv"),
         "perplexity": ensure_csv(run_timestamp, PERPLEXITY_FIELDS, f"perplexity_{engine_name}.csv"),
         "threads": ensure_csv(run_timestamp, THREAD_FIELDS, f"thread_scaling_{engine_name}.csv"),
     }
+
+    if sampling_mode == "sampled":
+        outputs["samples"] = ensure_csv(run_timestamp, SAMPLES_FIELDS, f"samples_{engine_name}.csv")
+    
+    return outputs
 
 
 def ensure_csv(run_timestamp, csv_fields, filename):
@@ -254,66 +275,6 @@ def read_prompt_file(prompt):
 
 def tokenize_prompt(llm, prompt_text):
     return llm.tokenize(prompt_text.encode("utf-8"))
-
-
-def measure_ram_cpu(model_path, prompt_file, context_size, generated_tokens, thread_count, engine_name):
-
-    llama_cli = get_binary("llama-cli", engine_name)
-
-    with tempfile.NamedTemporaryFile("w+", delete=False) as temp_file:
-        time_report_path = temp_file.name
-
-    command = [
-        "/usr/bin/time", "-v",
-        llama_cli,
-        "-m", str(model_path),
-        "-f", str(prompt_file),
-        "-c", str(context_size),
-        "-n", str(generated_tokens),
-        "-t", str(thread_count),
-        "--no-conversation", "--single-turn",
-    ]
-
-    rss_samples = []
-    try:
-        with open(os.devnull, "w") as discard, open(time_report_path, "w") as report:
-            proc = subprocess.Popen(command, stdout=discard, stderr=report)
-
-            # poll memory usage for average RAM 
-            try:
-                parent = psutil.Process(proc.pid)
-                while proc.poll() is None:
-                    try:
-                        rss = parent.memory_info().rss
-                        for c in parent.children(recursive=True):
-                            rss += c.memory_info().rss
-                        rss_samples.append(rss)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        break
-                    time.sleep(0.1)
-            except psutil.NoSuchProcess:
-                pass
-
-            proc.wait()
-
-        time_report = Path(time_report_path).read_text()
-    finally:
-        try:
-            os.unlink(time_report_path)
-        except OSError:
-            pass
-
-    # peak RAM = from Maximum resident set size
-    # cpu % = percent of CPU this cycle got
-    peak_ram_match = re.search(r"Maximum resident set size.*?(\d+)", time_report)
-    cpu_percent_match = re.search(r"Percent of CPU.*?(\d+)%", time_report)
-
-    # convert kb to megabytes
-    peak_ram_mb = int(peak_ram_match.group(1)) // 1024 if peak_ram_match else None
-    cpu_percent = int(cpu_percent_match.group(1)) if cpu_percent_match else None
-    avg_ram_mb = (int(sum(rss_samples) / len(rss_samples)) // (1024 * 1024)) if rss_samples else None
-
-    return {"peak_ram_mb": peak_ram_mb, "cpu_pct": cpu_percent, "avg_ram_mb": avg_ram_mb}
 
 
 def measure_prefill(llm, prompt_tokens):
@@ -480,6 +441,7 @@ def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx,
         "ctx": ctx,
         "threads": threads,
         "repeat": repeat_number,
+        "sample_count": ram_cpu.get("sample_count"),
         "prefill_tps": prefill_metrics.get("prefill_tps"),
         "prefill_ms": prefill_metrics.get("prefill_ms"),
         # "prefill_tps_stddev": metrics.get("prefill_tps_stddev"),
