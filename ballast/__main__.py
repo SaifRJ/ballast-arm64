@@ -109,13 +109,13 @@ def main():
                 prompt_token_ids = bm.tokenize_prompt(llm, prompt_text)
 
                 # Compute number of tokens
-                n_prompt = len(prompt_token_ids)
+                n_prompt_tokens = len(prompt_token_ids)
 
                 # Measure thread throughput per model per prompt
-                scaling = bm.measure_thread_scaling(model["local_path"], n_prompt, thread_list, engine_name)
+                scaling = bm.measure_thread_scaling(model["local_path"], prompt_token_ids, thread_list, CONTEXT_SIZE, GENERATED_TOKENS, CACHE_TYPE_K, CACHE_TYPE_V, engine_name)
 
                 # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, prompt_token_ids, scaling, run_id, run_timestamp)
+                bm.record_thread_scaling(outputs["threads"], engine_name, model, prompt, n_prompt_tokens, scaling, run_id, run_timestamp)
 
                 for repeat_number in range(1, REPEATS + 1):
 

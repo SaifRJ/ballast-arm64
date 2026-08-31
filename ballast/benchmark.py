@@ -97,6 +97,7 @@ THREAD_FIELDS = [
     "prompt_tokens",
     "threads",
     "prefill_tps",
+    "gen_tps"
 ]
 
 KV_TYPE_MAP = {
@@ -439,36 +440,22 @@ def get_thread_list(setting):
     )
 
 
-def measure_thread_scaling(model_path, prompt_tokens, thread_list, engine_name):
+def measure_thread_scaling(model_path, prompt_tokens, thread_list, context_size, generated_tokens, cache_type_k=None, cache_type_v=None, engine_name="default"):
 
-    llama_bench = get_binary("llama-bench", engine_name)
-
-    command = [
-        llama_bench,
-        "-m", str(model_path),
-        "-p", str(prompt_tokens),
-        "-n", "0",
-        "-t", ",".join(str(t) for t in thread_list),
-        "-o", "csv",
-    ]
-
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-
-    csv_lines = [line for line in result.stdout.splitlines() if line.strip()]
     scaling = []
-    if not csv_lines:
-        return scaling
+    for threads in thread_list:
+        log.info(f"thread_scaling: threads={threads}")
+        llm = load_engine(engine_name, model_path, context_size, threads, cache_type_k, cache_type_v)
+        warmup_engine(llm)
 
-    reader = csv.DictReader(csv_lines)
-    for row in reader:
-        try:
-            threads = int(row.get("n_threads", 0) or 0)
-            tps = float(row["avg_ts"])
-            scaling.append((threads, tps))
-        except (ValueError, KeyError):
-            continue
+        prefill = measure_prefill(llm, prompt_tokens)
+        generation = measure_generation(llm, prompt_tokens, generated_tokens)
+        del llm
+
+        scaling.append((threads, prefill.get("prefill_tps"), generation.get("gen_tps")))
 
     return scaling
+
 
 def record_performance(csv_path, engine_name, model, prompt, repeat_number, ctx, threads, gen_tokens, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp, type_k, type_v):
 
@@ -540,8 +527,7 @@ def record_perplexity(csv_path, engine_name, model, corpus, perplexity, ctx, run
 
 
 def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, scaling, run_id, run_timestamp):
-
-    for threads, tps in scaling:
+    for threads, prefill_tps, gen_tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {
             "run_id": run_id,
             "run_timestamp": run_timestamp,
@@ -551,5 +537,6 @@ def record_thread_scaling(csv_path, engine_name, model, prompt, prompt_tokens, s
             "prompt": prompt,
             "prompt_tokens": prompt_tokens,
             "threads": threads,
-            "prefill_tps": tps
+            "prefill_tps": prefill_tps,
+            "gen_tps": gen_tps
         })
