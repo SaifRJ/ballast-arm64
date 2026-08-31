@@ -20,7 +20,7 @@ run_timestamp = (run_time()).strftime("%Y-%m-%d_%H-%M")
 run_id = str(uuid.uuid4())
 run_folder = results_dir / f"Benchmark_{run_timestamp}"
 
-REQUIRED_BINARIES = ["llama-cli", "llama-bench", "llama-perplexity"]
+REQUIRED_BINARIES = ["llama-perplexity"]
 
 _KV_CANDIDATES = ["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"]
 

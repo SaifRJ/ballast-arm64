@@ -29,7 +29,7 @@ models:
     source: https://huggingface.co/bartowski/microsoft_Phi-4-mini-instruct-GGUF/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf
 
 # How should the pipeline run?
-mode: snapshot # placeholder sampling preset ( snapshot / time-series )
+mode: snapshot # placeholder sampling preset ( snapshot / sampler )
 task: benchmark # task type (benchmark / optimise / compare)
 
 install:
