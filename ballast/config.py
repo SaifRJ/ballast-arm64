@@ -22,16 +22,12 @@ run_folder = results_dir / f"Benchmark_{run_timestamp}"
 
 REQUIRED_BINARIES = ["llama-cli", "llama-bench", "llama-perplexity"]
 
+_KV_CANDIDATES = ["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"]
+
 KV_TYPE_MAP = {
-    "f32": llama_cpp.GGML_TYPE_F32,
-    "f16": llama_cpp.GGML_TYPE_F16,
-    "bf16": llama_cpp.GGML_TYPE_BF16,
-    "q8_0": llama_cpp.GGML_TYPE_Q8_0,
-    "q4_0": llama_cpp.GGML_TYPE_Q4_0,
-    "q4_1": llama_cpp.GGML_TYPE_Q4_1,
-    "q5_0": llama_cpp.GGML_TYPE_Q5_0,
-    "q5_1": llama_cpp.GGML_TYPE_Q5_1,
-    "iq4_nl": llama_cpp.GGML_TYPE_IQ4_NL,
+    name: getattr(llama_cpp, f"GGML_TYPE_{name.upper()}")
+    for name in _KV_CANDIDATES
+    if hasattr(llama_cpp, f"GGML_TYPE_{name.upper()}")
 }
 
 _BYTES_PER_ELEM = {

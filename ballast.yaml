@@ -17,6 +17,8 @@ engines:
 # Specify a 'name' (can be anything) and a source (local path or URL to a GGUF file)
 # Note: if you are specifying a local path, the name MUST match the file name. 
 models:
+  - name: TinyLlama
+    source: https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
   - name: Gemma-3
     source: https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
   - name: Qwen-3
@@ -34,11 +36,14 @@ install:
   parallel_builds: 1
 
 run_settings:
+  auto-repair: False
   context_size: 8192
   generated_tokens: 100
+  swa_full: false
   repeats: 1
   prompts: [short, medium, long, very_long]
   thread_scaling: auto # auto | [1, 2, 4, 8] | false
+  thread_scaling_prompt_tokens: 512
 
 # llama.cpp CLI flags passed at inference time.
 runtime_flags:
