@@ -1,7 +1,7 @@
 from ballast.schema import (ALL_METRICS, BallastConfig, EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, PipelineConfig, SamplingMode, Task, LogLevel, CacheType)
 from datetime import datetime
 from pathlib import Path
-import llama_cpp
+import llama_cpp # type: ignore
 import logging
 import yaml
 import uuid

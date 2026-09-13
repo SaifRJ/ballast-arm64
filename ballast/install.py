@@ -81,7 +81,7 @@ def validate_engine_entries(engines: list[EngineConfig]) -> None:
     log.info(f"{len(engines)} engine spec(s) validated.")
 
 
-def _validate_engine_source(engine_name, source, tag):
+def _validate_engine_source(engine_name: str, source: str, tag: str) -> None:
 
     try:
         result = subprocess.run(
@@ -147,7 +147,7 @@ def get_available_engines(engines: list[EngineConfig]) -> list[EngineConfig]:
 def install_engines(engines: list[EngineConfig]) -> None:
 
     engines_dir.mkdir(parents=True, exist_ok=True)
-    log.info("\n> Installing engines...")
+    log.info("Installing engines...")
 
     for engine in engines:
 
@@ -156,13 +156,16 @@ def install_engines(engines: list[EngineConfig]) -> None:
             continue
 
         if _needs_rebuild(engine):
-            log.info(f"-> [{engine.name}] building...")
+            log.info(f"[{engine.name}] building...")
             build_engine(engine)
         else:
-            log.info(f"-> [{engine.name}] already built, manifest matches, skipping.")
+            log.info(f"[{engine.name}] already built, manifest matches, skipping.")
 
 
 def build_engine(engine: EngineConfig) -> None:
+
+    assert engine.source is not None, "build_engine requires source"
+    assert engine.tag is not None, "build_engine requires tag"
 
     engine_dir = engines_dir / engine.name
     source_dir = engine_dir / "source"
@@ -173,11 +176,14 @@ def build_engine(engine: EngineConfig) -> None:
     engine_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
+    assert engine.source is not None, "build_engine called on path-based engine"
+
     if not source_dir.exists():
         _run_logged(["git", "clone", engine.source, str(source_dir)], build_log, f"clone {engine.source}")
     else:
         _run_logged(["git", "-C", str(source_dir), "fetch", "--tags", "--quiet"], build_log, f"fetch {engine.name}")
 
+    assert engine.tag is not None
     _run_logged(["git", "-C", str(source_dir), "checkout", "--quiet", engine.tag], build_log, f"checkout {engine.tag}")
 
     result = subprocess.run(["git", "-C", str(source_dir), "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
@@ -197,6 +203,7 @@ def build_engine(engine: EngineConfig) -> None:
 
 def _link_prebuilt_engine(engine: EngineConfig) -> None:
 
+    assert engine.path is not None, "_link_prebuilt_engine requires engine.path"
     user_path = Path(engine.path).expanduser().resolve()
     engine_dir = engines_dir / engine.name
     build_dir = engine_dir / "build"
@@ -205,7 +212,7 @@ def _link_prebuilt_engine(engine: EngineConfig) -> None:
 
     # if build already links to the right place, nothing to do
     if build_dir.is_symlink() and build_dir.resolve() == user_path:
-        log.info(f"> [{engine.name}] already linked to {user_path}, skipping.")
+        log.info(f"[{engine.name}] already linked to {user_path}, skipping.")
         return
 
     # replace whatever's there
@@ -217,7 +224,7 @@ def _link_prebuilt_engine(engine: EngineConfig) -> None:
 
     build_dir.symlink_to(user_path)
     _write_manifest(engine_dir, engine, resolved_sha=None)
-    log.info(f"-> [{engine.name}] linked to {user_path}")
+    log.info(f"[{engine.name}] linked to {user_path}")
 
 
 def _needs_rebuild(engine: EngineConfig) -> bool:
@@ -260,7 +267,7 @@ def _write_manifest(engine_dir: Path, engine: EngineConfig, resolved_sha: str | 
         json.dump(manifest, f, indent=2)
 
 
-def _run_logged(cmd, log_path, description):
+def _run_logged(cmd: list[str], log_path: Path, description: str) -> None:
 
     with open(log_path, "a") as f:
         f.write(f"\n=== {description} ===\n")
@@ -270,7 +277,7 @@ def _run_logged(cmd, log_path, description):
         result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=False)
 
     if result.returncode != 0:
-        log.error(f"\n> FAILED: {description}")
+        log.error(f"\nFAILED: {description}")
 
         with open(log_path) as f:
             lines = f.readlines()
@@ -321,7 +328,7 @@ def validate_model_entries(models: list[ModelConfig]) -> None:
     log.info(f"{len(models)} model spec(s) validated.")
 
 
-def _validate_model_url(model_name, source):
+def _validate_model_url(model_name: str, source: str) -> None:
     
     # ensure GGUF URL is reachable before installation
     
@@ -355,7 +362,7 @@ def _validate_model_url(model_name, source):
         )
 
 
-def _validate_model_local_path(model_name, source):
+def _validate_model_local_path(model_name: str, source: str) -> None:
 
     # Validate local path exists and is a GGUF file
     path = Path(source).expanduser().resolve()
@@ -375,39 +382,39 @@ def _validate_model_local_path(model_name, source):
     if path.suffix.lower() != ".gguf":
         raise ValueError(
             f"\n> Model '{model_name}' local file is not a .gguf: {path}"
-            f"\n-> Ballast benchmarks GGUF models specifically."
+            f"\n-> Ballast can only benchmark GGUF models."
         )
 
 
 def install_models(models: list[ModelConfig]) -> None:
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    log.info("> Installing models...")
+    log.info("Installing models...")
 
     for model in models:
         local_path = models_dir / f"{model.name}.gguf"
 
         if local_path.exists() or local_path.is_symlink():
-            log.info(f"> [{model.name}] already installed, skipping.")
+            log.info(f"[{model.name}] already installed, skipping.")
             continue
 
         if not model.source.lower().startswith("http"):
             src_path = Path(model.source).expanduser().resolve()
             local_path.symlink_to(src_path)
-            log.info(f"> [{model.name}] symlinked from {src_path}")
+            log.info(f"[{model.name}] symlinked from {src_path}")
             continue
 
-        log.info(f"> [{model.name}] downloading from {model.source}")
+        log.info(f"[{model.name}] downloading from {model.source}")
         command = ["wget", "-q", "--show-progress", "-O", str(local_path), model.source]
 
         try:
             subprocess.run(command, check=True)
-            log.info(f"> [{model.name}] installed to {local_path.name}")
+            log.info(f"[{model.name}] installed to {local_path.name}")
 
         except subprocess.CalledProcessError:
             if local_path.exists():
                 local_path.unlink()
-            log.error(f"> [{model.name}] FAILED to download from {model.source}")
+            log.error(f"[{model.name}] FAILED to download from {model.source}")
 
 
 def get_available_models(models: list[ModelConfig]) -> list[ModelConfig]:
@@ -471,7 +478,7 @@ def validate_corpus_entries(corpora: list[CorpusConfig]) -> None:
     log.info(f"{len(corpora)} corpus spec(s) validated.")
 
 
-def _validate_corpus_url(corpus_name, source):
+def _validate_corpus_url(corpus_name: str, source: str) -> None:
 
     try:
         req = Request(source, method="HEAD")
@@ -496,7 +503,7 @@ def _validate_corpus_url(corpus_name, source):
         )
 
 
-def _validate_corpus_local_path(corpus_name, source):
+def _validate_corpus_local_path(corpus_name: str, source: str) -> None:
 
     path = Path(source).expanduser().resolve()
 
@@ -514,13 +521,13 @@ def _validate_corpus_local_path(corpus_name, source):
 def install_corpora(corpora: list[CorpusConfig]) -> None:
 
     perplexity_dir.mkdir(parents=True, exist_ok=True)
-    log.info("> Installing corpora...")
+    log.info("Installing corpora...")
 
     for corpus in corpora:
         local_path = perplexity_dir / f"{corpus.name}.txt"
 
         if local_path.exists() or local_path.is_symlink():
-            log.info(f"> [{corpus.name}] already installed, skipping.")
+            log.info(f"[{corpus.name}] already installed, skipping.")
             continue
 
         # local file
@@ -532,14 +539,14 @@ def install_corpora(corpora: list[CorpusConfig]) -> None:
                 _extract_zip_to(src_path, local_path, corpus.name)
             else:
                 local_path.symlink_to(src_path)
-                log.info(f">[{corpus.name}] symlinked from {src_path}")
+                log.info(f"[{corpus.name}] symlinked from {src_path}")
             continue
 
         # URL
         is_zip = corpus.source.lower().endswith(".zip")
         download_target = perplexity_dir / (f"{corpus.name}.zip" if is_zip else f"{corpus.name}.txt")
 
-        log.info(f">[{corpus.name}] downloading from {corpus.source}")
+        log.info(f"[{corpus.name}] downloading from {corpus.source}")
 
         try:
             subprocess.run(["wget", "-q", "--show-progress", "-O", str(download_target), corpus.source],check=True)
@@ -548,7 +555,7 @@ def install_corpora(corpora: list[CorpusConfig]) -> None:
             if download_target.exists():
                 download_target.unlink()
 
-            log.error(f"> [{corpus.name}] FAILED to download from {corpus.source}")
+            log.error(f"[{corpus.name}] FAILED to download from {corpus.source}")
             continue
 
         if is_zip:
@@ -556,17 +563,17 @@ def install_corpora(corpora: list[CorpusConfig]) -> None:
             download_target.unlink()
 
         else:
-            log.info(f"> [{corpus.name}] installed to {local_path.name}")
+            log.info(f"[{corpus.name}] installed to {local_path.name}")
 
 
-def _extract_zip_to(zip_path, target_path, corpus_name):
+def _extract_zip_to(zip_path: Path, target_path: Path, corpus_name: str) -> None:
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
             candidates = [n for n in zf.namelist() if n.endswith((".raw", ".txt"))]
 
             if not candidates:
-                log.error(f"-> [{corpus_name}] FAILED: no .raw or .txt file found in zip")
+                log.error(f"[{corpus_name}] FAILED: no .raw or .txt file found in zip")
                 return
             
             member = candidates[0]
@@ -574,14 +581,14 @@ def _extract_zip_to(zip_path, target_path, corpus_name):
             with zf.open(member) as src, open(target_path, "wb") as dst:
                 dst.write(src.read())
 
-        log.info(f"-> [{corpus_name}] extracted {member} to {target_path.name}")
+        log.info(f"[{corpus_name}] extracted {member} to {target_path.name}")
 
     except (zipfile.BadZipFile, OSError) as e:
 
         if target_path.exists():
             target_path.unlink()
             
-        log.error(f"-> [{corpus_name}] FAILED to extract zip: {e}")
+        log.error(f"[{corpus_name}] FAILED to extract zip: {e}")
 
 
 def get_available_corpora(corpora: list[CorpusConfig]) -> list[CorpusConfig]:
