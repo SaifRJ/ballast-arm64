@@ -50,12 +50,12 @@ def main():
     thread_list = bm.get_thread_list(pipeline_yaml.thread_scaling)
 
     # Copy generated engine manifests
-    bm.snapshot_manifests(engines, run_timestamp)
+    bm.snapshot_manifests(engines)
 
     for engine in engines:
 
         # Create all output CSVs for this engine
-        outputs = bm.create_run_outputs(run_timestamp, engine.name, pipeline_yaml.mode)
+        outputs = bm.create_run_outputs(engine.name, pipeline_yaml.mode)
 
         for model in models:
 
@@ -73,14 +73,14 @@ def main():
                 kv_alloc = bm.compute_kv_alloc(model_info, model)
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
-            bm.record_model_info(outputs["model_info"], engine.name, model, model_info, kv_alloc, run_id, run_timestamp)
+            bm.record_model_info(outputs["model_info"], engine, model, model_info, kv_alloc, run_id, run_timestamp)
 
             if Metric.THREAD_SCALING in metrics_yaml.enabled:
                 # Measure thread throughput per model per prompt
                 scaling = bm.measure_thread_scaling(model, runtime_yaml, thread_list, pipeline_yaml.thread_scaling_prompt_tokens)
 
                 # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine.name, model, pipeline_yaml.thread_scaling_prompt_tokens, scaling, run_id, run_timestamp)
+                bm.record_thread_scaling(outputs["threads"], engine, model, pipeline_yaml.thread_scaling_prompt_tokens, scaling, run_id, run_timestamp)
 
             if Metric.PERPLEXITY in metrics_yaml.enabled:
                 for corpus in corpora:
@@ -88,7 +88,7 @@ def main():
                     perplexity = bm.measure_perplexity(model, corpus, engine.name)
 
                     # Append ppl values to perplexity_{engine_name}.csv file output
-                    bm.record_perplexity(outputs["perplexity"], engine.name, model, corpus, perplexity, run_id, run_timestamp)
+                    bm.record_perplexity(outputs["perplexity"], engine, model, corpus, perplexity, run_id, run_timestamp)
 
             for prompt in pipeline_yaml.prompts:
 
@@ -101,15 +101,15 @@ def main():
 
                 for repeat_number in range(1, pipeline_yaml.repeats + 1):
 
-                    log.info(f"\n> {model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
+                    log.info(f"{model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
 
-                    with ResourceSampler(interval_ms=100, mode="snapshot") as sampler:
+                    with ResourceSampler(interval_ms=pipeline_yaml.sample_interval_ms, mode=pipeline_yaml.mode, csv_path=outputs.get("samples"), tag=f"{model.name}/{prompt}/rep{repeat_number}", run_id=run_id, run_timestamp=run_timestamp, engine_name=engine.name, model_name=model.name, prompt=prompt, repeat=repeat_number, phase="combined") as sampler:
 
                         if Metric.PREFILL in metrics_yaml.enabled:
                             # Measure prefill/s
                             prefill_metrics = bm.measure_prefill(llm, prompt_token_ids) 
 
-                        if Metric.GENERATION in metrics_yaml.enabled:
+                        if Metric.GENERATION in metrics_yaml.enabled:    
                             # Measure token generation/s
                             generation_metrics = bm.measure_generation(llm, prompt_token_ids, model.generated_tokens)
 
@@ -117,10 +117,10 @@ def main():
                     ram_cpu = sampler.aggregate()
                     
                     # Read how full the kv-cache is
-                    kv_usage = bm.read_kv_usage(llm, kv_alloc, model.context_size) #ignore
+                    kv_usage = bm.read_kv_usage(llm, kv_alloc, model) #ignore
 
                     # Append performance metric values to performance_{engine_name}.csv file output
-                    bm.record_performance(outputs["performance"], engine.name, model, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
+                    bm.record_performance(outputs["performance"], engine, model, runtime_yaml, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
 
             # Delete the llm object at the end of each model's loop to ensure a clean run per model
             del llm
@@ -131,8 +131,9 @@ def main():
     # charts / html from summary
     # bm.generate_report(run_timestamp)
 
-    log.info(f"\n> PROCESS COMPLETE. \n> Results in results/Benchmark_{run_timestamp}/ ")
-    log.info(f"\n> Run time: {str(bm.run_time() - start_time).split('.')[0]}")
+    log.info(f"PROCESS COMPLETE.")
+    log.info(f"Results in results/Benchmark_{run_timestamp}/")
+    log.info(f"Run time: {str(bm.run_time() - start_time).split('.')[0]}")
 
 if __name__ == "__main__":
     main()
