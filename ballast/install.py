@@ -1,4 +1,5 @@
 from ballast.config import engines_dir, models_dir, perplexity_dir, REQUIRED_BINARIES, run_time
+from ballast.schema import EngineConfig, ModelConfig, CorpusConfig
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from pathlib import Path
@@ -11,10 +12,8 @@ import logging
 
 log = logging.getLogger("ballast")
 
-def validate_engine_entries(engines):
 
-    # Validate every engine entry from ballast.yaml before install runs
-    # Checks structural shape and that URLs / tags / paths resolve
+def validate_engine_entries(engines: list[EngineConfig]) -> None:
 
     if not engines:
         raise ValueError(
@@ -22,18 +21,15 @@ def validate_engine_entries(engines):
             "\n-> Add at least one entry under 'engines:' before running install."
         )
 
-    seen_names = set()
+    seen_names: set[str] = set()
 
     for index, engine in enumerate(engines, 1):
+        name = engine.name.strip()
 
-        # verify name
-        name = engine.get("name")
-        if not name or not isinstance(name, str) or not name.strip():
+        if not name:
             raise ValueError(
-                f"\n> Engine at position {index} is missing 'name' or has an empty name."
-                f"\n-> Every engine entry needs a non-empty 'name' field."
+                f"\n> Engine at position {index} has an empty name."
             )
-        name = name.strip()
 
         if name in seen_names:
             raise ValueError(
@@ -48,9 +44,8 @@ def validate_engine_entries(engines):
                 f"\n-> Names must not contain '/', '\\', or start with '.'"
             )
 
-        # verify if source-based or path-based
-        has_source = "source" in engine or "tag" in engine or "cmake_flags" in engine
-        has_path = "path" in engine
+        has_source = engine.source is not None or engine.tag is not None or bool(engine.cmake_flags)
+        has_path = engine.path is not None
 
         if has_source and has_path:
             raise ValueError(
@@ -64,57 +59,29 @@ def validate_engine_entries(engines):
                 f"\n-> Provide either 'source' + 'tag' or 'path'."
             )
 
-        # if source-based, verify if URL is reachable and if tag exists in remote
         if has_source:
-            source = engine.get("source")
-            tag = engine.get("tag")
+            if not engine.source:
+                raise ValueError(f"\n> Engine '{name}' is missing 'source'.")
+            if not engine.tag:
+                raise ValueError(f"\n> Engine '{name}' is missing 'tag'.")
 
-            if not source or not isinstance(source, str):
-                raise ValueError(
-                    f"\n> Engine '{name}' is missing 'source' or 'source' is not a string."
-                    f"\n-> 'source' should be a git URL, e.g. https://github.com/ggml-org/llama.cpp"
-                )
-            if not tag or not isinstance(tag, str):
-                raise ValueError(
-                    f"\n> Engine '{name}' is missing 'tag' or 'tag' is not a string."
-                    f"\n-> 'tag' should be a git tag or commit SHA, e.g. b10327"
-                )
+            _validate_engine_source(name, engine.source, engine.tag)
 
-            cmake_flags = engine.get("cmake_flags", {})
-            if not isinstance(cmake_flags, dict):
-                raise ValueError(
-                    f"\n> Engine '{name}' has 'cmake_flags' that is not a mapping."
-                    f"\n-> Format: {{ GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON }}"
-                )
-
-            _validate_engine_source(name, source, tag)
-
-        # if path-based, directory must exist on disk right now
         if has_path:
-            path = engine.get("path")
-            if not path or not isinstance(path, str):
-                raise ValueError(
-                    f"\n> Engine '{name}' has 'path' that is missing or not a string."
-                    f"\n-> 'path' should point to an existing llama.cpp build directory."
-                )
-
-            path_obj = Path(path).expanduser().resolve()
+            path_obj = Path(engine.path).expanduser().resolve()
             if not path_obj.exists():
                 raise ValueError(
                     f"\n> Engine '{name}' path does not exist: {path_obj}"
-                    f"\n-> Verify the path in ballast.yaml points to a built llama.cpp directory."
                 )
             if not path_obj.is_dir():
                 raise ValueError(
                     f"\n> Engine '{name}' path is not a directory: {path_obj}"
-                    f"\n-> 'path' should be a directory, not a file."
                 )
 
-    print(f"> {len(engines)} engine spec(s) validated.")
-    return engines
+    log.info(f"{len(engines)} engine spec(s) validated.")
 
 
-def _validate_engine_source(engine_name, source, tag):
+def _validate_engine_source(engine_name: str, source: str, tag: str) -> None:
 
     try:
         result = subprocess.run(
@@ -163,46 +130,44 @@ def _validate_engine_source(engine_name, source, tag):
         f"\n-> Verify the tag exists (check the repo's releases/tags page)."
     )
 
-def get_available_engines(engines):
+def get_available_engines(engines: list[EngineConfig]) -> list[EngineConfig]:
 
     available = []
     for engine in engines:
-        name = engine["name"]
-        bin_dir = engines_dir / name / "build" / "bin"
+        bin_dir = engines_dir / engine.name / "build" / "bin"
 
         # engine is available only if all required binaries are present
         if all((bin_dir / b).exists() for b in REQUIRED_BINARIES):
-            engine["bin_dir"] = bin_dir
+            engine.bin_dir = bin_dir
             available.append(engine)
 
     return available
 
-def install_engines(engines):
+
+def install_engines(engines: list[EngineConfig]) -> None:
 
     engines_dir.mkdir(parents=True, exist_ok=True)
-    print("\n> Installing engines...")
+    log.info("Installing engines...")
 
     for engine in engines:
-        name = engine["name"]
 
-        if "path" in engine:
+        if engine.path is not None:
             _link_prebuilt_engine(engine)
             continue
 
         if _needs_rebuild(engine):
-            print(f"-> [{name}] building...")
+            log.info(f"[{engine.name}] building...")
             build_engine(engine)
         else:
-            print(f"-> [{name}] already built, manifest matches, skipping.")
+            log.info(f"[{engine.name}] already built, manifest matches, skipping.")
 
 
-def build_engine(engine):
-    name = engine["name"]
-    source = engine["source"]
-    tag = engine["tag"]
-    cmake_flags = engine.get("cmake_flags", {})
+def build_engine(engine: EngineConfig) -> None:
 
-    engine_dir = engines_dir / name
+    assert engine.source is not None, "build_engine requires source"
+    assert engine.tag is not None, "build_engine requires tag"
+
+    engine_dir = engines_dir / engine.name
     source_dir = engine_dir / "source"
     build_dir = engine_dir / "build"
     logs_dir = engine_dir / "logs"
@@ -211,50 +176,43 @@ def build_engine(engine):
     engine_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    # clone if not present
+    assert engine.source is not None, "build_engine called on path-based engine"
+
     if not source_dir.exists():
-        _run_logged(["git", "clone", source, str(source_dir)], build_log, f"clone {source}")
+        _run_logged(["git", "clone", engine.source, str(source_dir)], build_log, f"clone {engine.source}")
     else:
-        _run_logged(["git", "-C", str(source_dir), "fetch", "--tags", "--quiet"], build_log, f"fetch {name}")
+        _run_logged(["git", "-C", str(source_dir), "fetch", "--tags", "--quiet"], build_log, f"fetch {engine.name}")
 
-    _run_logged(["git", "-C", str(source_dir), "checkout", "--quiet", tag], build_log, f"checkout {tag}")
+    assert engine.tag is not None
+    _run_logged(["git", "-C", str(source_dir), "checkout", "--quiet", engine.tag], build_log, f"checkout {engine.tag}")
 
-    # resolved SHA
-    result = subprocess.run(
-        ["git", "-C", str(source_dir), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    )
+    result = subprocess.run(["git", "-C", str(source_dir), "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
     resolved_sha = result.stdout.strip()
 
-    # cmake configure with user-specified flags
     configure_cmd = ["cmake", "-B", str(build_dir), "-S", str(source_dir), "-DCMAKE_BUILD_TYPE=Release"]
-
-    for flag_name, flag_value in cmake_flags.items():
+    for flag_name, flag_value in engine.cmake_flags.items():
         configure_cmd.append(f"-D{flag_name}={flag_value}")
 
-    _run_logged(configure_cmd, build_log, f"cmake configure {name}")
+    _run_logged(configure_cmd, build_log, f"cmake configure {engine.name}")
 
-    # cmake build with all cores
-    _run_logged(
-        ["cmake", "--build", str(build_dir), "--config", "Release", "-j", str(os.cpu_count() or 1)],
-        build_log, f"cmake build {name}",
-    )
+    _run_logged(["cmake", "--build", str(build_dir), "--config", "Release", "-j", str(os.cpu_count() or 1)], build_log, f"cmake build {engine.name}")
 
     _write_manifest(engine_dir, engine, resolved_sha)
-    print(f"-> [{name}] built successfully.")
+    log.info(f"[{engine.name}] built successfully.")
 
 
-def _link_prebuilt_engine(engine):
-    name = engine["name"]
-    user_path = Path(engine["path"]).expanduser().resolve()
-    engine_dir = engines_dir / name
+def _link_prebuilt_engine(engine: EngineConfig) -> None:
+
+    assert engine.path is not None, "_link_prebuilt_engine requires engine.path"
+    user_path = Path(engine.path).expanduser().resolve()
+    engine_dir = engines_dir / engine.name
     build_dir = engine_dir / "build"
 
     engine_dir.mkdir(parents=True, exist_ok=True)
 
     # if build already links to the right place, nothing to do
     if build_dir.is_symlink() and build_dir.resolve() == user_path:
-        print(f"-> [{name}] already linked to {user_path}, skipping.")
+        log.info(f"[{engine.name}] already linked to {user_path}, skipping.")
         return
 
     # replace whatever's there
@@ -266,12 +224,12 @@ def _link_prebuilt_engine(engine):
 
     build_dir.symlink_to(user_path)
     _write_manifest(engine_dir, engine, resolved_sha=None)
-    print(f"-> [{name}] linked to {user_path}")
+    log.info(f"[{engine.name}] linked to {user_path}")
 
 
-def _needs_rebuild(engine):
-    name = engine["name"]
-    manifest_path = engines_dir / name / "manifest.json"
+def _needs_rebuild(engine: EngineConfig) -> bool:
+
+    manifest_path = engines_dir / engine.name / "manifest.json"
 
     if not manifest_path.exists():
         return True
@@ -282,26 +240,26 @@ def _needs_rebuild(engine):
     except (json.JSONDecodeError, OSError):
         return True
 
-    if manifest.get("source") != engine.get("source"): return True
-    if manifest.get("tag") != engine.get("tag"): return True
-    if manifest.get("cmake_flags", {}) != engine.get("cmake_flags", {}): return True
+    if manifest.get("source") != engine.source: return True
+    if manifest.get("tag") != engine.tag: return True
+    if manifest.get("cmake_flags", {}) != engine.cmake_flags: return True
 
-    bin_dir = engines_dir / name / "build" / "bin"
+    bin_dir = engines_dir / engine.name / "build" / "bin"
     if not all((bin_dir / b).exists() for b in REQUIRED_BINARIES):
         return True
 
     return False
 
 
-def _write_manifest(engine_dir, engine, resolved_sha):
+def _write_manifest(engine_dir: Path, engine: EngineConfig, resolved_sha: str | None) -> None:
     manifest = {
-        "name": engine["name"],
-        "source": engine.get("source"),
-        "tag": engine.get("tag"),
+        "name": engine.name,
+        "source": engine.source,
+        "tag": engine.tag,
         "resolved_git_sha": resolved_sha,
-        "cmake_flags": engine.get("cmake_flags", {}),
-        "path": engine.get("path"),
-        "user_supplied": "path" in engine,
+        "cmake_flags": engine.cmake_flags,
+        "path": engine.path,
+        "user_supplied": engine.path is not None,
         "build_date": run_time().isoformat(),
     }
 
@@ -309,30 +267,28 @@ def _write_manifest(engine_dir, engine, resolved_sha):
         json.dump(manifest, f, indent=2)
 
 
-def _run_logged(cmd, log_path, description):
-    with open(log_path, "a") as log:
-        log.write(f"\n=== {description} ===\n")
-        log.write(f"$ {' '.join(cmd)}\n\n")
-        log.flush()
+def _run_logged(cmd: list[str], log_path: Path, description: str) -> None:
 
-        result = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, check=False)
+    with open(log_path, "a") as f:
+        f.write(f"\n=== {description} ===\n")
+        f.write(f"$ {' '.join(cmd)}\n\n")
+        f.flush()
+
+        result = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=False)
 
     if result.returncode != 0:
-        # dump tail of log so user sees why without opening the file
-        print(f"\n> FAILED: {description}")
-        print(f"> Last 40 lines of {log_path}:")
-        with open(log_path) as log:
-            lines = log.readlines()
+        log.error(f"\nFAILED: {description}")
+
+        with open(log_path) as f:
+            lines = f.readlines()
+
         for line in lines[-40:]:
-            print(f"  {line.rstrip()}")
-        raise RuntimeError(f"Build step failed: {description}")
+            log.error(f"  {line.rstrip()}")
+
+        raise RuntimeError(f"> Build step failed: {description}")
     
 
-def validate_model_entries(models):
-
-    # Validate each model to have:
-    # 'name' (unique, filesystem-safe)
-    # 'source' (URL ending in .gguf, or a local .gguf filepath)
+def validate_model_entries(models: list[ModelConfig]) -> None:
 
     if not models:
         raise ValueError(
@@ -340,23 +296,20 @@ def validate_model_entries(models):
             "\n-> Add at least one entry under 'models:' before running."
         )
 
-    seen_names = set()
+    seen_names: set[str] = set()
 
     for index, model in enumerate(models, 1):
+        name = model.name.strip()
 
-        name = model.get("name")
-        if not name or not isinstance(name, str) or not name.strip():
-            raise ValueError(
-                f"\n> Model at position {index} is missing 'name' or has an empty name."
-                f"\n-> Every model entry needs a non-empty 'name' field."
-            )
-        name = name.strip()
+        if not name:
+            raise ValueError(f"\n> Model at position {index} has an empty name.")
 
         if name in seen_names:
             raise ValueError(
                 f"\n> Duplicate model name: '{name}'."
                 f"\n-> Model names must be unique within ballast.yaml."
             )
+        
         seen_names.add(name)
 
         if "/" in name or "\\" in name or name.startswith("."):
@@ -365,24 +318,17 @@ def validate_model_entries(models):
                 f"\n-> Names must not contain '/', '\\', or start with '.'"
             )
 
-        source = model.get("source")
-        if not source or not isinstance(source, str):
-            raise ValueError(
-                f"\n> Model '{name}' is missing 'source' or 'source' is not a string."
-                f"\n-> 'source' should be a .gguf URL, or a local filepath to a .gguf file."
-            )
-        source = source.strip()
+        source = model.source.strip()
 
         if source.lower().startswith("http"):
             _validate_model_url(name, source)
         else:
             _validate_model_local_path(name, source)
 
-    print(f"> {len(models)} model spec(s) validated.")
-    return models
+    log.info(f"{len(models)} model spec(s) validated.")
 
 
-def _validate_model_url(model_name, source):
+def _validate_model_url(model_name: str, source: str) -> None:
     
     # ensure GGUF URL is reachable before installation
     
@@ -401,11 +347,13 @@ def _validate_model_url(model_name, source):
                     f"\n> Model '{model_name}': URL returned HTTP {response.status}"
                     f"\n-> Source: {source}"
                 )
+            
     except HTTPError as e:
         raise ValueError(
             f"\n> Model '{model_name}': URL not reachable (HTTP {e.code})"
             f"\n-> Source: {source}"
         )
+    
     except URLError as e:
         raise ValueError(
             f"\n> Model '{model_name}': URL not reachable"
@@ -414,7 +362,7 @@ def _validate_model_url(model_name, source):
         )
 
 
-def _validate_model_local_path(model_name, source):
+def _validate_model_local_path(model_name: str, source: str) -> None:
 
     # Validate local path exists and is a GGUF file
     path = Path(source).expanduser().resolve()
@@ -424,67 +372,66 @@ def _validate_model_local_path(model_name, source):
             f"\n> Model '{model_name}' points to a local file that does not exist: {path}"
             f"\n-> Verify the path in ballast.yaml, or provide a download URL."
         )
+    
     if not path.is_file():
         raise ValueError(
             f"\n> Model '{model_name}' path is not a file: {path}"
             f"\n-> 'source' should be a .gguf file, not a directory."
         )
+    
     if path.suffix.lower() != ".gguf":
         raise ValueError(
             f"\n> Model '{model_name}' local file is not a .gguf: {path}"
-            f"\n-> Ballast benchmarks GGUF models specifically."
+            f"\n-> Ballast can only benchmark GGUF models."
         )
 
 
-def install_models(models):
+def install_models(models: list[ModelConfig]) -> None:
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    print("\n> Installing models...")
+    log.info("Installing models...")
 
     for model in models:
-        name = model["name"]
-        source = model["source"]
-        local_path = models_dir / f"{name}.gguf"
+        local_path = models_dir / f"{model.name}.gguf"
 
         if local_path.exists() or local_path.is_symlink():
-            print(f"-> [{name}] already installed, skipping.")
+            log.info(f"[{model.name}] already installed, skipping.")
             continue
 
-        if not source.lower().startswith("http"):
-            src_path = Path(source).expanduser().resolve()
+        if not model.source.lower().startswith("http"):
+            src_path = Path(model.source).expanduser().resolve()
             local_path.symlink_to(src_path)
-            print(f"-> [{name}] symlinked from {src_path}")
+            log.info(f"[{model.name}] symlinked from {src_path}")
             continue
 
-        print(f"-> [{name}] downloading from {source}")
-        command = ["wget", "-q", "--show-progress", "-O", str(local_path), source]
+        log.info(f"[{model.name}] downloading from {model.source}")
+        command = ["wget", "-q", "--show-progress", "-O", str(local_path), model.source]
 
         try:
             subprocess.run(command, check=True)
-            print(f"-> [{name}] installed to {local_path.name}")
+            log.info(f"[{model.name}] installed to {local_path.name}")
 
         except subprocess.CalledProcessError:
-
             if local_path.exists():
                 local_path.unlink()
-            print(f"-> [{name}] FAILED to download from {source}")
+            log.error(f"[{model.name}] FAILED to download from {model.source}")
 
 
-def get_available_models(models):
+def get_available_models(models: list[ModelConfig]) -> list[ModelConfig]:
 
     available = []
     for model in models:
-        name = model["name"]
-        local_path = models_dir / f"{name}.gguf"
+        
+        local_path = models_dir / f"{model.name}.gguf"
 
         if local_path.exists() or local_path.is_symlink():
-            model["local_path"] = local_path
+            model.local_path = local_path
             available.append(model)
 
     return available
 
 
-def validate_corpus_entries(corpora):
+def validate_corpus_entries(corpora: list[CorpusConfig]) -> None:
 
     if not corpora:
         raise ValueError(
@@ -492,17 +439,15 @@ def validate_corpus_entries(corpora):
             "\n-> Add at least one entry under 'corpora:' before running."
         )
 
-    seen_names = set()
+    seen_names: set[str] = set()
 
     for index, corpus in enumerate(corpora, 1):
+        name = corpus.name.strip()
 
-        name = corpus.get("name")
-        if not name or not isinstance(name, str) or not name.strip():
+        if not name:
             raise ValueError(
-                f"\n> Corpus at position {index} is missing 'name' or has an empty name."
-                f"\n-> Every corpus entry needs a non-empty 'name' field."
+                f"\n> Corpus at position {index} has an empty name."
             )
-        name = name.strip()
 
         if name in seen_names:
             raise ValueError(
@@ -517,18 +462,11 @@ def validate_corpus_entries(corpora):
                 f"\n-> Names must not contain '/', '\\', or start with '.'"
             )
 
-        source = corpus.get("source")
-        if not source or not isinstance(source, str):
-            raise ValueError(
-                f"\n> Corpus '{name}' is missing 'source' or 'source' is not a string."
-                f"\n-> 'source' should be a URL or local filepath (.txt, .raw, or .zip)."
-            )
-        source = source.strip()
+        source = corpus.source.strip()
 
-        chunks = corpus.get("chunks")
-        if chunks != "all" and (not isinstance(chunks, int) or chunks < 1):
+        if corpus.chunks != "all" and (not isinstance(corpus.chunks, int) or corpus.chunks < 1):
             raise ValueError(
-                f"\n> Corpus '{name}' has invalid 'chunks': {chunks!r}"
+                f"\n> Corpus '{name}' has invalid 'chunks': {corpus.chunks!r}"
                 f"\n-> 'chunks' must be a positive integer or 'all'."
             )
 
@@ -537,11 +475,10 @@ def validate_corpus_entries(corpora):
         else:
             _validate_corpus_local_path(name, source)
 
-    print(f"> {len(corpora)} corpus spec(s) validated.")
-    return corpora
+    log.info(f"{len(corpora)} corpus spec(s) validated.")
 
 
-def _validate_corpus_url(corpus_name, source):
+def _validate_corpus_url(corpus_name: str, source: str) -> None:
 
     try:
         req = Request(source, method="HEAD")
@@ -551,11 +488,13 @@ def _validate_corpus_url(corpus_name, source):
                     f"\n> Corpus '{corpus_name}': URL returned HTTP {response.status}"
                     f"\n-> Source: {source}"
                 )
+            
     except HTTPError as e:
         raise ValueError(
             f"\n> Corpus '{corpus_name}': URL not reachable (HTTP {e.code})"
             f"\n-> Source: {source}"
         )
+    
     except URLError as e:
         raise ValueError(
             f"\n> Corpus '{corpus_name}': URL not reachable"
@@ -564,7 +503,7 @@ def _validate_corpus_url(corpus_name, source):
         )
 
 
-def _validate_corpus_local_path(corpus_name, source):
+def _validate_corpus_local_path(corpus_name: str, source: str) -> None:
 
     path = Path(source).expanduser().resolve()
 
@@ -572,86 +511,95 @@ def _validate_corpus_local_path(corpus_name, source):
         raise ValueError(
             f"\n> Corpus '{corpus_name}' points to a local file that does not exist: {path}"
         )
+    
     if not path.is_file():
         raise ValueError(
             f"\n> Corpus '{corpus_name}' path is not a file: {path}"
         )
 
 
-def install_corpora(corpora):
+def install_corpora(corpora: list[CorpusConfig]) -> None:
 
     perplexity_dir.mkdir(parents=True, exist_ok=True)
-    print("\n> Installing corpora...")
+    log.info("Installing corpora...")
 
     for corpus in corpora:
-        name = corpus["name"]
-        source = corpus["source"]
-        local_path = perplexity_dir / f"{name}.txt"
+        local_path = perplexity_dir / f"{corpus.name}.txt"
 
         if local_path.exists() or local_path.is_symlink():
-            print(f"-> [{name}] already installed, skipping.")
+            log.info(f"[{corpus.name}] already installed, skipping.")
             continue
 
         # local file
-        if not source.lower().startswith("http"):
-            src_path = Path(source).expanduser().resolve()
+        if not corpus.source.lower().startswith("http"):
+
+            src_path = Path(corpus.source).expanduser().resolve()
+
             if src_path.suffix.lower() == ".zip":
-                _extract_zip_to(src_path, local_path, name)
+                _extract_zip_to(src_path, local_path, corpus.name)
             else:
                 local_path.symlink_to(src_path)
-                print(f"-> [{name}] symlinked from {src_path}")
+                log.info(f"[{corpus.name}] symlinked from {src_path}")
             continue
 
         # URL
-        is_zip = source.lower().endswith(".zip")
-        download_target = perplexity_dir / (f"{name}.zip" if is_zip else f"{name}.txt")
+        is_zip = corpus.source.lower().endswith(".zip")
+        download_target = perplexity_dir / (f"{corpus.name}.zip" if is_zip else f"{corpus.name}.txt")
 
-        print(f"-> [{name}] downloading from {source}")
+        log.info(f"[{corpus.name}] downloading from {corpus.source}")
+
         try:
-            subprocess.run(
-                ["wget", "-q", "--show-progress", "-O", str(download_target), source],
-                check=True,
-            )
+            subprocess.run(["wget", "-q", "--show-progress", "-O", str(download_target), corpus.source],check=True)
+
         except subprocess.CalledProcessError:
             if download_target.exists():
                 download_target.unlink()
-            print(f"-> [{name}] FAILED to download from {source}")
+
+            log.error(f"[{corpus.name}] FAILED to download from {corpus.source}")
             continue
 
         if is_zip:
-            _extract_zip_to(download_target, local_path, name)
+            _extract_zip_to(download_target, local_path, corpus.name)
             download_target.unlink()
+
         else:
-            print(f"-> [{name}] installed to {local_path.name}")
+            log.info(f"[{corpus.name}] installed to {local_path.name}")
 
 
-def _extract_zip_to(zip_path, target_path, corpus_name):
+def _extract_zip_to(zip_path: Path, target_path: Path, corpus_name: str) -> None:
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
             candidates = [n for n in zf.namelist() if n.endswith((".raw", ".txt"))]
+
             if not candidates:
-                print(f"-> [{corpus_name}] FAILED: no .raw or .txt file found in zip")
+                log.error(f"[{corpus_name}] FAILED: no .raw or .txt file found in zip")
                 return
+            
             member = candidates[0]
+
             with zf.open(member) as src, open(target_path, "wb") as dst:
                 dst.write(src.read())
-        print(f"-> [{corpus_name}] extracted {member} to {target_path.name}")
+
+        log.info(f"[{corpus_name}] extracted {member} to {target_path.name}")
+
     except (zipfile.BadZipFile, OSError) as e:
+
         if target_path.exists():
             target_path.unlink()
-        print(f"-> [{corpus_name}] FAILED to extract zip: {e}")
+            
+        log.error(f"[{corpus_name}] FAILED to extract zip: {e}")
 
 
-def get_available_corpora(corpora):
+def get_available_corpora(corpora: list[CorpusConfig]) -> list[CorpusConfig]:
 
     available = []
     for corpus in corpora:
-        name = corpus["name"]
-        local_path = perplexity_dir / f"{name}.txt"
+
+        local_path = perplexity_dir / f"{corpus.name}.txt"
 
         if local_path.exists() or local_path.is_symlink():
-            corpus["local_path"] = local_path
+            corpus.local_path = local_path
             available.append(corpus)
 
     return available
