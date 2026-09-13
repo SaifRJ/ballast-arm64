@@ -1,79 +1,66 @@
-from ballast.config import load_config, init_run, run_id, run_timestamp, prompts_dir
+from ballast.config import load_config, init_run, run_id, run_timestamp
+from ballast.schema import Metric
 from ballast.sampler import ResourceSampler
 import ballast.benchmark as bm
 import ballast.install as inst
 
-# main.py: orchestration for the Arm64 LLM benchmarking pipeline
-# Manages code orchestration and the core benchmarking loop
-# All functions live in benchmark.py, main.py only decides what runs and in what order
+# This module controls top-level code orchestration for the entire pipeline the pipeline. 
+# No functions are defined here.
 
 start_time = bm.run_time()
 config = load_config()
 log = init_run()
-
-# Run config
-# todo: collapse run_settings and runtime_flags into one section
-run = config["run_settings"]
-runtime_flags = config["runtime_flags"]
-MODE = config["mode"]
-CONTEXT_SIZE = run["context_size"]
-GENERATED_TOKENS = run["generated_tokens"]
-REPEATS = run["repeats"]
-THREAD_SCALING = run["thread_scaling"]
-THREAD_SCALING_TOKENS = run["thread_scaling_prompt_tokens"]
-PROMPTS = run["prompts"]
-CACHE_TYPE_K = runtime_flags.get("cache_type_k")
-CACHE_TYPE_V = runtime_flags.get("cache_type_v")
+engines_yaml = config.engines
+models_yaml = config.models
+corpora_yaml = config.corpora
+pipeline_yaml = config.pipeline
+runtime_yaml = config.runtime
+metrics_yaml = config.metrics
 
 def main():
 
     # Validate engine entries in ballast.yaml
-    inst.validate_engine_entries(config["engines"])
+    inst.validate_engine_entries(engines_yaml)
 
     # Install valid engine entries
-    inst.install_engines(config["engines"])
+    inst.install_engines(engines_yaml)
 
     # Return list of successfully installed engines
-    engines = inst.get_available_engines(config["engines"])
+    engines = inst.get_available_engines(engines_yaml)
 
     # Validate model entry format in ballast.yaml
-    inst.validate_model_entries(config["models"])
+    inst.validate_model_entries(models_yaml)
 
     # Install valid model entries
-    inst.install_models(config["models"])
+    inst.install_models(models_yaml)
 
     # Return list of successfully installed models
-    models = inst.get_available_models(config["models"])
+    models = inst.get_available_models(models_yaml)
 
     # Validate corpus entry format in ballast.yaml
-    inst.validate_corpus_entries(config["corpora"])
+    inst.validate_corpus_entries(corpora_yaml)
 
     # Install valid corpus entries
-    inst.install_corpora(config["corpora"])
+    inst.install_corpora(corpora_yaml)
 
     # Return list of successfully installed corpora
-    corpora = inst.get_available_corpora(config["corpora"])
-
-    # Detect available CPU cores
-    thread_count = bm.get_thread_count()
+    corpora = inst.get_available_corpora(corpora_yaml)
 
     # Return thread sweep configuration from ballast.yaml
-    thread_list = bm.get_thread_list(THREAD_SCALING)
+    thread_list = bm.get_thread_list(pipeline_yaml.thread_scaling)
 
     # Copy generated engine manifests
     bm.snapshot_manifests(engines, run_timestamp)
 
     for engine in engines:
 
-        engine_name = engine["name"]
-
         # Create all output CSVs for this engine
-        outputs = bm.create_run_outputs(run_timestamp, engine_name, sampling_mode=MODE)
+        outputs = bm.create_run_outputs(run_timestamp, engine.name, pipeline_yaml.mode)
 
         for model in models:
 
             # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
-            llm = bm.load_engine(model["local_path"], CONTEXT_SIZE, thread_count, CACHE_TYPE_K, CACHE_TYPE_V)
+            llm = bm.load_engine(model, runtime_yaml)
 
             # Run a small inference to avoid first-call cost from affecting measurements
             bm.warmup_engine(llm) 
@@ -81,67 +68,59 @@ def main():
             # Retrieve a dict containing model metadata
             model_info = bm.get_model_info(llm)
 
-            # Return KV-cache allocation per model
-            kv_alloc = bm.compute_kv_alloc(model_info, CONTEXT_SIZE, CACHE_TYPE_K, CACHE_TYPE_V)
+            if Metric.KV_CACHE in metrics_yaml.enabled:
+                # Return KV-cache allocation per model
+                kv_alloc = bm.compute_kv_alloc(model_info, model)
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
-            bm.record_model_info(outputs["model_info"], engine_name, model, model_info, kv_alloc, run_id, run_timestamp)
+            bm.record_model_info(outputs["model_info"], engine.name, model, model_info, kv_alloc, run_id, run_timestamp)
 
-             # Measure thread throughput per model per prompt
-            scaling = bm.measure_thread_scaling(model["local_path"], thread_list, CONTEXT_SIZE, GENERATED_TOKENS, THREAD_SCALING_TOKENS, CACHE_TYPE_K, CACHE_TYPE_V, engine_name)
+            if Metric.THREAD_SCALING in metrics_yaml.enabled:
+                # Measure thread throughput per model per prompt
+                scaling = bm.measure_thread_scaling(model, runtime_yaml, thread_list, pipeline_yaml.thread_scaling_prompt_tokens)
 
-            # Append thread scaling values to CSV file
-            bm.record_thread_scaling(outputs["threads"], engine_name, model, THREAD_SCALING_TOKENS, scaling, run_id, run_timestamp)
+                # Append thread scaling values to CSV file
+                bm.record_thread_scaling(outputs["threads"], engine.name, model, pipeline_yaml.thread_scaling_prompt_tokens, scaling, run_id, run_timestamp)
 
-            for corpus in corpora:
+            if Metric.PERPLEXITY in metrics_yaml.enabled:
+                for corpus in corpora:
+                    # Measure perplexity per model per corpus
+                    perplexity = bm.measure_perplexity(model, corpus, engine.name)
 
-                # Measure perplexity per model per corpus
-                perplexity = bm.measure_perplexity(model["local_path"], corpus["local_path"], corpus["chunks"], engine_name)
+                    # Append ppl values to perplexity_{engine_name}.csv file output
+                    bm.record_perplexity(outputs["perplexity"], engine.name, model, corpus, perplexity, run_id, run_timestamp)
 
-                # Append ppl values to perplexity_{engine_name}.csv file output
-                bm.record_perplexity(outputs["perplexity"], engine_name, model, corpus, perplexity, CONTEXT_SIZE, run_id, run_timestamp)
-
-            for prompt in PROMPTS:
-
-                # Locate prompt file
-                prompt_file = prompts_dir / f"{prompt}.txt"
-
-                if not prompt_file.exists():
-                    print(f"\n> ERROR: Unable to read prompt '{prompt}' (file missing: {prompt_file}). Prompt will be skipped.")
-                    print("-> Please ensure the prompt file exists and matches the name of the main.py list")
-                    continue
+            for prompt in pipeline_yaml.prompts:
 
                 # Read prompt file for tokenization
-                prompt_text = bm.read_prompt_file(prompt_file)
+                prompt_text = bm.read_prompt_file(prompt)
 
                 # Return prompt contents as tokens
-                prompt_token_ids = bm.tokenize_prompt(llm, prompt_text)
+                if prompt_text:
+                    prompt_token_ids = bm.tokenize_prompt(llm, prompt_text)
 
-                # Compute number of tokens
-                n_prompt_tokens = len(prompt_token_ids)
+                for repeat_number in range(1, pipeline_yaml.repeats + 1):
 
-                for repeat_number in range(1, REPEATS + 1):
-
-                    print(f"\n> {model["name"]} / {prompt}: Repeat {repeat_number}/{REPEATS}")
+                    log.info(f"\n> {model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
 
                     with ResourceSampler(interval_ms=100, mode="snapshot") as sampler:
 
-                        # Measure prefill/s
-                        prefill_metrics = bm.measure_prefill(llm, prompt_token_ids) 
-            
-                        # Measure token generation/s
-                        generation_metrics = bm.measure_generation(llm, prompt_token_ids, GENERATED_TOKENS)
+                        if Metric.PREFILL in metrics_yaml.enabled:
+                            # Measure prefill/s
+                            prefill_metrics = bm.measure_prefill(llm, prompt_token_ids) 
+
+                        if Metric.GENERATION in metrics_yaml.enabled:
+                            # Measure token generation/s
+                            generation_metrics = bm.measure_generation(llm, prompt_token_ids, model.generated_tokens)
 
                     # Measure RAM/CPU usage via PID sampler
                     ram_cpu = sampler.aggregate()
                     
                     # Read how full the kv-cache is
-                    kv_usage = bm.read_kv_usage(llm, kv_alloc, CONTEXT_SIZE)
+                    kv_usage = bm.read_kv_usage(llm, kv_alloc, model.context_size) #ignore
 
                     # Append performance metric values to performance_{engine_name}.csv file output
-                    bm.record_performance(outputs["performance"], engine_name, model, prompt, repeat_number, CONTEXT_SIZE, thread_count, 
-                                          GENERATED_TOKENS, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp, 
-                                          type_k=CACHE_TYPE_K or "f16", type_v=CACHE_TYPE_V or "f16")
+                    bm.record_performance(outputs["performance"], engine.name, model, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
 
             # Delete the llm object at the end of each model's loop to ensure a clean run per model
             del llm
@@ -152,8 +131,8 @@ def main():
     # charts / html from summary
     # bm.generate_report(run_timestamp)
 
-    print(f"\n> PROCESS COMPLETE. \n> Results in results/Benchmark_{run_timestamp}/ ")
-    print(f"\n> Run time: {str(bm.run_time() - start_time).split('.')[0]}")
+    log.info(f"\n> PROCESS COMPLETE. \n> Results in results/Benchmark_{run_timestamp}/ ")
+    log.info(f"\n> Run time: {str(bm.run_time() - start_time).split('.')[0]}")
 
 if __name__ == "__main__":
     main()
