@@ -1,14 +1,10 @@
+from ballast.schema import (ALL_METRICS, BallastConfig, EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, PipelineConfig, SamplingMode, Task, LogLevel, CacheType)
 from datetime import datetime
 from pathlib import Path
 import llama_cpp
 import logging
 import yaml
 import uuid
-from ballast.schema import (
-    ALL_METRICS, BallastConfig, EngineConfig, Metric, 
-    MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, 
-    PipelineConfig, SamplingMode, Task, LogLevel, CacheType,
-)
 
 def run_time():
     return datetime.now().astimezone()
@@ -27,24 +23,22 @@ run_folder = results_dir / f"Benchmark_{run_timestamp}"
 
 REQUIRED_BINARIES = ["llama-perplexity"]
 
-_KV_CANDIDATES = ["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"]
-
 KV_TYPE_MAP = {
-    name: getattr(llama_cpp, f"GGML_TYPE_{name.upper()}")
-    for name in _KV_CANDIDATES
-    if hasattr(llama_cpp, f"GGML_TYPE_{name.upper()}")
+    ct: getattr(llama_cpp, f"GGML_TYPE_{ct.name}")
+    for ct in CacheType
+    if hasattr(llama_cpp, f"GGML_TYPE_{ct.name}")
 }
 
 BYTES_PER_ELEM = {
-    "f32": 4.0,
-    "f16": 2.0,
-    "bf16": 2.0,
-    "q8_0": 1.0,
-    "q5_0": 0.625,
-    "q5_1": 0.6875,
-    "q4_0": 0.5625,
-    "q4_1": 0.625,
-    "iq4_nl": 0.5625
+    CacheType.F32: 4.0,
+    CacheType.F16: 2.0,
+    CacheType.BF16: 2.0,
+    CacheType.Q8_0: 1.0,
+    CacheType.Q5_0: 0.625,
+    CacheType.Q5_1: 0.6875,
+    CacheType.Q4_0: 0.5625,
+    CacheType.Q4_1: 0.625,
+    CacheType.IQ4_NL: 0.5625,
 }
 
 KV_ALLOWED = frozenset(KV_TYPE_MAP.keys())
