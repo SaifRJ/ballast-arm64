@@ -114,14 +114,6 @@ SAMPLES_FIELDS = [
     "sample_count"
 ]
 
-def init_metrics(metrics: MetricSet) -> tuple:
-    return tuple(None if m in metrics else "NA" for m in [
-        Metric.KV_CACHE, Metric.PREFILL, Metric.GENERATION, Metric.RAM_CPU,
-        Metric.PERPLEXITY, Metric.THREAD_SCALING, Metric.POWER_DRAW,
-        Metric.MEMORY_BANDWIDTH, Metric.CPU_TEMP,
-    ])
-
-
 def get_binary(binary_name: str, engine_name: str) -> str:
 
     binary_path = engines_dir / engine_name / "build" / "bin" / binary_name
