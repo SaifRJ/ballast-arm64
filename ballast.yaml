@@ -2,10 +2,10 @@
 
 # What engine(s) do you want to use?
 engines:
-  - name: kleidiai_build
-    source: https://github.com/ggml-org/llama.cpp
-    tag: b10327
-    cmake_flags: { GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON }
+  - name: kleidiai_build # Specify the name of the engine. This will be used to create a folder in the output_dir for this engine's results.
+    source: https://github.com/ggml-org/llama.cpp # Specify the source of the engine. This can be a GitHub/Hugging Face repo or a local file path.
+    tag: b10327 # Specify the tag/commit of the engine to use.
+    cmake_flags: { GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON } # Specify any CMake flags to use when building the engine.
 
   - name: baseline_build
     source: https://github.com/ggml-org/llama.cpp
@@ -20,10 +20,10 @@ models:
     context_size: 2048 # How many tokens to use for the context window when generating tokens
     cache_type_k: q8_0 # Specify what key quantization type to use for the model cache. Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, bf16, f32, iq4_nl
     cache_type_v: q8_0 # Specify what value quantization type to use for the model cache. Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, bf16, f32, iq4_nl
-    fa: 1
-    batch_size: 1024
-    generated_tokens: 100 # Number of tokens to generate per measurement window
-    swa_full: false
+    fa: # Specify if flaash attention should be used for the model. Options: True (enabled), False (disabled)
+    batch_size: 1024 # Specify how many tokens to process in a single batch for the model. This is used for throughput measurements.
+    generated_tokens: 100 # Specify the number of tokens to generate per measurement window
+    swa_full: false # Specify if the model should be loaded in full (true) or in a streaming manner (false). If true, the entire model will be loaded into memory at once. If false, the model will be loaded in chunks as needed. This can reduce memory usage but may increase latency.
 
   - name: Gemma-3
     source: https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
@@ -35,30 +35,10 @@ models:
     generated_tokens: 100 
     swa_full: false
 
-  - name: Qwen-3
-    source: https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf
-    context_size: 8192
-    cache_type_k: q8_0
-    cache_type_v: q8_0
-    fa: 1
-    batch_size: 2048
-    generated_tokens: 100
-    swa_full: false
-
-  - name: Phi-4
-    source: https://huggingface.co/bartowski/microsoft_Phi-4-mini-instruct-GGUF/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf
-    context_size: 8192
-    cache_type_k: q8_0 
-    cache_type_v: q8_0 
-    fa: 1
-    batch_size: 2048
-    generated_tokens: 100
-    swa_full: false
-
 # Specify a corpus, or several, to test perplexity per model. Perplexity will not be measured if this section is empty.
 # Perplexity is a language-modelling metric (how well the model predicts tokens based on the content of the corpus).
 corpora:
-  - name: wikitext-2
+  - name: wikitext-2 
     source: https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip
     chunks: 40
 
@@ -73,7 +53,7 @@ pipeline:
   sample_interval_ms: 100 # If sampled mode is used, specify how often Ballast should sample the model's output (in milliseconds)
   repeats: 1 # How many times to repeat each prompt for each model. Allows for standard deviation to be calculated.
   warmup: 1 # Specify the number of warmup iterations before each measurement occurs.
-  prompts: [short, medium, long, very_long] # Specify which prompts to use for the benchmark. The prompt file names must match the names specified here. If set to 'auto', all files in the prompts/ directory will be used.
+  prompts: [short, medium, long] # Specify which prompts to use for the benchmark. The prompt file names must match the names specified here. If set to 'auto', all files in the prompts/ directory will be used.
   thread_scaling: [1, 2, 4, 8] # Set the number of threads to use for thread scaling throughput measurements (e.g. [1, 2, 4, 8, 16]). If set to 'auto', will measure throughput for 1, 2, 4, 8, and 16 threads.
   thread_scaling_prompt_tokens: 512 # Length of synthetic prompt used for thread scaling measurement. Matches llama-bench's -p 512 default.
   parallel_builds: 1 # Specify how many engine builds to run in parallel. If set to 1, will build one engine/model at a time. If set to auto, will build as many as possible based on the number of CPU cores available.
