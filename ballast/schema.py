@@ -94,11 +94,10 @@ class Metric(str, Enum):
     PERPLEXITY = "perplexity"
     THREAD_SCALING = "thread_scaling"
     POWER_DRAW = "power_draw"
-    HARDWARE_ID = "hardware_id"
-
+    MEMORY_BANDWIDTH = "memory_bandwidth"
+    CPU_TEMP = "cpu_temp"
 
 ALL_METRICS: frozenset[Metric] = frozenset(Metric)
-
 
 @dataclass
 class MetricSet:
