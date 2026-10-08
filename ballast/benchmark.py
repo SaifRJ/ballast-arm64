@@ -1,6 +1,5 @@
-from ballast.schema import (EngineConfig, ModelConfig, CorpusConfig, RuntimeConfig, SamplingMode, CacheType)
+from ballast.schema import (EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, SamplingMode, CacheType)
 from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM, KV_TYPE_MAP, run_time
-from ballast.sampler import ResourceSampler
 from typing import Callable, Any
 import llama_cpp # type: ignore
 from pathlib import Path
@@ -13,7 +12,8 @@ import re
 import shutil
 import logging
 
-# This file holds every function that benchmarks and returns a performance metric via CSV outputs.
+# This module holds all the logic that benchmarks and records a performance metric.
+# Besides helper functions, no top-level code is executed here.
 
 log = logging.getLogger("ballast")
 
@@ -113,6 +113,14 @@ SAMPLES_FIELDS = [
     "cpu_pct",
     "sample_count"
 ]
+
+def init_metrics(metrics: MetricSet) -> tuple:
+    return tuple(None if m in metrics else "NA" for m in [
+        Metric.KV_CACHE, Metric.PREFILL, Metric.GENERATION, Metric.RAM_CPU,
+        Metric.PERPLEXITY, Metric.THREAD_SCALING, Metric.POWER_DRAW,
+        Metric.MEMORY_BANDWIDTH, Metric.CPU_TEMP,
+    ])
+
 
 def get_binary(binary_name: str, engine_name: str) -> str:
 
@@ -431,7 +439,7 @@ def measure_thread_scaling(model: ModelConfig, runtime: RuntimeConfig, thread_li
 
 def record_performance(csv_path: Path, engine: EngineConfig, model: ModelConfig, runtime: RuntimeConfig, prompt: str, repeat_number: int,
                        prefill_metrics: dict, generation_metrics: dict, ram_cpu: dict, kv_usage: dict, run_id: str, run_timestamp: str) -> None:
-
+    
     append_row(csv_path, PERFORMANCE_FIELDS, {
         "run_id": run_id,
         "run_timestamp": run_timestamp,
@@ -442,21 +450,21 @@ def record_performance(csv_path: Path, engine: EngineConfig, model: ModelConfig,
         "ctx": model.context_size,
         "threads": resolve_thread_count(runtime.n_threads),
         "repeat": repeat_number,
-        "sample_count": ram_cpu.get("sample_count"),
-        "prefill_tps": prefill_metrics.get("prefill_tps"),
-        "prefill_ms": prefill_metrics.get("prefill_ms"),
+        "sample_count": ram_cpu.get("sample_count") if ram_cpu else None,
+        "prefill_tps": prefill_metrics.get("prefill_tps") if prefill_metrics else None,
+        "prefill_ms": prefill_metrics.get("prefill_ms") if prefill_metrics else None,
         # "prefill_tps_stddev": metrics.get("prefill_tps_stddev"),
         "gen_tokens": model.generated_tokens,
-        "gen_tps": generation_metrics.get("gen_tps"),
+        "gen_tps": generation_metrics.get("gen_tps") if generation_metrics else None,
         # "gen_tps_stddev": .get("gen_tps_stddev"),
-        "ttft_ms": generation_metrics.get("ttft_ms"),
-        "cpu_pct": ram_cpu.get("cpu_pct"),
-        "avg_ram_mb": ram_cpu.get("avg_ram_mb"),
-        "peak_ram_mb": ram_cpu.get("peak_ram_mb"),
+        "ttft_ms": generation_metrics.get("ttft_ms") if generation_metrics else None,
+        "cpu_pct": ram_cpu.get("cpu_pct") if ram_cpu else None,
+        "avg_ram_mb": ram_cpu.get("avg_ram_mb") if ram_cpu else None,
+        "peak_ram_mb": ram_cpu.get("peak_ram_mb") if ram_cpu else None,
         "type_k": model.cache_type_k.value if model.cache_type_k else None,
         "type_v": model.cache_type_v.value if model.cache_type_v else None,
-        "kv_used_mb": kv_usage.get("kv_used_mb"),
-        "kv_utilisation": kv_usage.get("kv_utilisation")
+        "kv_used_mb": kv_usage.get("kv_used_mb") if kv_usage else None,
+        "kv_utilisation": kv_usage.get("kv_utilisation") if kv_usage else None
     })
 
 
