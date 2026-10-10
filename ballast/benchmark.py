@@ -211,7 +211,7 @@ def ensure_csv(csv_fields: list[str], filename: str) -> Path:
     run_folder.mkdir(parents=True, exist_ok=True)
     csv_path = run_folder / filename
 
-    if csv_path.exists():
+    if not csv_path.exists():
         with open(csv_path, "w", newline="") as csv_file:
             csv.writer(csv_file).writerow(csv_fields)
 
