@@ -1,4 +1,4 @@
-from ballast.schema import (EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, SamplingMode, CacheType)
+from ballast.schema import (EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, CacheType)
 from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM, KV_TYPE_MAP, run_time
 from typing import Callable, Any
 import llama_cpp # type: ignore
@@ -206,28 +206,14 @@ def resolve_thread_count(value: int | str) -> int:
     return int(value)
 
 
-def create_run_outputs(engine_name: str, mode: SamplingMode) -> dict:
-
-    outputs = {
-        "performance": ensure_csv(PERFORMANCE_FIELDS, f"performance_{engine_name}.csv"),
-        "model_info": ensure_csv(MODEL_INFO_FIELDS, f"model_info_{engine_name}.csv"),
-        "perplexity": ensure_csv(PERPLEXITY_FIELDS, f"perplexity_{engine_name}.csv"),
-        "threads": ensure_csv(THREAD_FIELDS, f"thread_scaling_{engine_name}.csv"),
-    }
-
-    if mode is SamplingMode.SAMPLED:
-        outputs["samples"] = ensure_csv(SAMPLES_FIELDS, f"samples_{engine_name}.csv")
-    
-    return outputs
-
-
 def ensure_csv(csv_fields: list[str], filename: str) -> Path:
 
     run_folder.mkdir(parents=True, exist_ok=True)
     csv_path = run_folder / filename
 
-    with open(csv_path, "w", newline="") as csv_file:
-        csv.writer(csv_file).writerow(csv_fields)
+    if not csv_path.exists():
+        with open(csv_path, "w", newline="") as csv_file:
+            csv.writer(csv_file).writerow(csv_fields)
 
     return csv_path
 
@@ -429,8 +415,10 @@ def measure_thread_scaling(model: ModelConfig, runtime: RuntimeConfig, thread_li
     return scaling
 
 
-def record_performance(csv_path: Path, engine: EngineConfig, model: ModelConfig, runtime: RuntimeConfig, prompt: str, repeat_number: int,
-                       prefill_metrics: dict, generation_metrics: dict, ram_cpu: dict, kv_usage: dict, run_id: str, run_timestamp: str) -> None:
+def record_performance(engine: EngineConfig, model: ModelConfig, runtime: RuntimeConfig, prompt: str, repeat_number: int,
+                       prefill_metrics: dict | None, generation_metrics: dict | None, ram_cpu: dict | None, kv_usage: dict | None, run_id: str, run_timestamp: str) -> None:
+
+    csv_path = ensure_csv(PERFORMANCE_FIELDS, f"perf_snapshot_{engine.name}.csv")
     
     append_row(csv_path, PERFORMANCE_FIELDS, {
         "run_id": run_id,
@@ -460,7 +448,9 @@ def record_performance(csv_path: Path, engine: EngineConfig, model: ModelConfig,
     })
 
 
-def record_model_info(csv_path: Path, engine: EngineConfig, model: ModelConfig, model_info: dict, kv_alloc: float | None, run_id: str, run_timestamp: str) -> None:
+def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict, kv_alloc: float | None, run_id: str, run_timestamp: str) -> None:
+
+    csv_path = ensure_csv(MODEL_INFO_FIELDS, f"model_info_{engine.name}.csv")
 
     append_row(csv_path, MODEL_INFO_FIELDS, {
         "run_id": run_id,
@@ -485,7 +475,9 @@ def record_model_info(csv_path: Path, engine: EngineConfig, model: ModelConfig, 
     })
 
 
-def record_perplexity(csv_path: Path, engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: float | None, run_id: str, run_timestamp: str) -> None:
+def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: float | None, run_id: str, run_timestamp: str) -> None:
+
+    csv_path = ensure_csv(PERPLEXITY_FIELDS, f"perplexity_{engine.name}.csv")
 
     append_row(csv_path, PERPLEXITY_FIELDS, {
         "run_id": run_id,
@@ -500,7 +492,9 @@ def record_perplexity(csv_path: Path, engine: EngineConfig, model: ModelConfig, 
     })
 
 
-def record_thread_scaling(csv_path: Path, engine: EngineConfig, model: ModelConfig, token_count: int, scaling: list[tuple], run_id: str, run_timestamp: str) -> None:
+def record_thread_scaling(engine: EngineConfig, model: ModelConfig, token_count: int, scaling: list[tuple], run_id: str, run_timestamp: str) -> None:
+
+    csv_path = ensure_csv(THREAD_FIELDS, f"thread_scaling_{engine.name}.csv")
 
     for threads, prefill_tps, gen_tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {

@@ -1,5 +1,5 @@
 from ballast.config import load_config, init_run, run_id, run_timestamp
-from ballast.schema import Metric
+from ballast.schema import Metric, SamplingMode
 from ballast.sampler import ResourceSampler
 import ballast.benchmark as bm
 import ballast.install as inst
@@ -58,9 +58,6 @@ def main():
 
     for engine in engines:
 
-        # Create all output CSVs for this engine
-        outputs = bm.create_run_outputs(engine.name, pipeline_yaml.mode)
-
         # engine router placeholder
         # bm.activate_engine(engine)
 
@@ -87,7 +84,7 @@ def main():
                 thread_scaling = bm.measure_thread_scaling(model, runtime_yaml, thread_list, pipeline_yaml.thread_scaling_prompt_tokens)
 
                 # Append thread scaling values to CSV file
-                bm.record_thread_scaling(outputs["threads"], engine, model, pipeline_yaml.thread_scaling_prompt_tokens, thread_scaling, run_id, run_timestamp)
+                bm.record_thread_scaling(engine, model, pipeline_yaml.thread_scaling_prompt_tokens, thread_scaling, run_id, run_timestamp)
 
             if Metric.PERPLEXITY in metrics_yaml.enabled:
 
@@ -97,7 +94,7 @@ def main():
                     perplexity = bm.measure_perplexity(model, corpus, engine.name)
 
                     # Append ppl values to perplexity_{engine_name}.csv file output
-                    bm.record_perplexity(outputs["perplexity"], engine, model, corpus, perplexity, run_id, run_timestamp)
+                    bm.record_perplexity(engine, model, corpus, perplexity, run_id, run_timestamp)
 
             for prompt in pipeline_yaml.prompts:
 
@@ -119,7 +116,19 @@ def main():
 
                     log.info(f"{model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
 
-                    with ResourceSampler(interval_ms=pipeline_yaml.sample_interval_ms, mode=pipeline_yaml.mode, csv_path=outputs.get("samples"), tag=f"{model.name}/{prompt}/rep{repeat_number}", run_id=run_id, run_timestamp=run_timestamp, engine_name=engine.name, model_name=model.name, prompt=prompt, repeat=repeat_number, phase="combined") as sampler:
+                    sampler_csv_path = bm.ensure_csv(bm.SAMPLES_FIELDS, f"samples_{engine.name}.csv") if pipeline_yaml.mode is SamplingMode.SAMPLED else None
+                    with ResourceSampler(
+                        interval_ms=pipeline_yaml.sample_interval_ms,
+                        mode=pipeline_yaml.mode,
+                        csv_path=sampler_csv_path,
+                        tag=f"{model.name}/{prompt}/rep{repeat_number}",
+                        run_id=run_id,
+                        run_timestamp=run_timestamp,
+                        engine_name=engine.name,
+                        model_name=model.name,
+                        prompt=prompt,
+                        repeat=repeat_number,
+                        phase="combined") as sampler:
 
                         if Metric.PREFILL in metrics_yaml.enabled:
 
@@ -151,10 +160,10 @@ def main():
                         kv_usage = bm.read_kv_usage(llm, kv_alloc, model)
 
                     # Append performance metric values to performance_{engine_name}.csv file output
-                    bm.record_performance(outputs["performance"], engine, model, runtime_yaml, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
+                    bm.record_performance(engine, model, runtime_yaml, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
 
             # Append model info and architecture detail to model_info_{engine_name}.csv file output 
-            bm.record_model_info(outputs["model_info"], engine, model, model_info, kv_alloc, run_id, run_timestamp)
+            bm.record_model_info(engine, model, model_info, kv_alloc, run_id, run_timestamp)
 
             # Delete the llm object at the end of each model's loop to ensure a clean run per model
             del llm
