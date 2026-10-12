@@ -3,7 +3,7 @@ from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM,
 from typing import Callable, Any
 import llama_cpp # type: ignore
 from pathlib import Path
-from llama_cpp import Llama, llama_model_size, llama_model_n_params, llama_perf_context_reset, llama_memory_clear, llama_get_memory # type: ignore
+from llama_cpp import Llama, llama_model_size, llama_model_n_params # type: ignore
 import time
 import subprocess
 import csv
@@ -158,8 +158,7 @@ def warmup_engine(llm: Llama) -> None:
         token = llm.sample()
         llm.eval([token])
 
-    llama_memory_clear(llama_get_memory(llm.ctx), True)
-    llama_perf_context_reset(llm.ctx)
+    llm.reset()
 
 
 def get_model_info(llm: Llama) -> dict:
@@ -252,7 +251,6 @@ def tokenize_prompt(llm: Llama, prompt_text: str) -> list[int]:
 def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
 
     llm.reset()
-    llama_memory_clear(llama_get_memory(llm.ctx), True)
 
     n_prefill = len(prompt_tokens)
     if n_prefill == 0:
@@ -275,7 +273,6 @@ def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
 def measure_generation(llm: Llama, prompt_tokens: list[int], n_generated_tokens: int) -> dict:
 
     llm.reset()
-    llama_memory_clear(llama_get_memory(llm.ctx), True)
 
     ttft_start = time.perf_counter_ns()
     llm.eval(prompt_tokens)
