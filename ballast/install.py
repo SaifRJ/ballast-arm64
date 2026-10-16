@@ -68,6 +68,7 @@ def validate_engine_entries(engines: list[EngineConfig]) -> None:
             _validate_engine_source(name, engine.source, engine.tag)
 
         if has_path:
+            assert engine.path is not None
             path_obj = Path(engine.path).expanduser().resolve()
             if not path_obj.exists():
                 raise ValueError(
@@ -147,7 +148,6 @@ def get_available_engines(engines: list[EngineConfig]) -> list[EngineConfig]:
 def install_engines(engines: list[EngineConfig]) -> None:
 
     engines_dir.mkdir(parents=True, exist_ok=True)
-    log.info("Installing engines...")
 
     for engine in engines:
 
@@ -156,10 +156,10 @@ def install_engines(engines: list[EngineConfig]) -> None:
             continue
 
         if _needs_rebuild(engine):
-            log.info(f"[{engine.name}] building...")
+            log.info(f"building [{engine.name}]")
             build_engine(engine)
         else:
-            log.info(f"[{engine.name}] already built, manifest matches, skipping.")
+            log.info(f"[{engine.name}] engine manifest matched.")
 
 
 def build_engine(engine: EngineConfig) -> None:
@@ -212,7 +212,7 @@ def _link_prebuilt_engine(engine: EngineConfig) -> None:
 
     # if build already links to the right place, nothing to do
     if build_dir.is_symlink() and build_dir.resolve() == user_path:
-        log.info(f"[{engine.name}] already linked to {user_path}, skipping.")
+        log.info(f"[{engine.name}] already linked to {user_path}.")
         return
 
     # replace whatever's there
@@ -389,13 +389,12 @@ def _validate_model_local_path(model_name: str, source: str) -> None:
 def install_models(models: list[ModelConfig]) -> None:
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    log.info("Installing models...")
 
     for model in models:
         local_path = models_dir / f"{model.name}.gguf"
 
         if local_path.exists() or local_path.is_symlink():
-            log.info(f"[{model.name}] already installed, skipping.")
+            log.info(f"[{model.name}] installation verified.")
             continue
 
         if not model.source.lower().startswith("http"):
@@ -404,7 +403,7 @@ def install_models(models: list[ModelConfig]) -> None:
             log.info(f"[{model.name}] symlinked from {src_path}")
             continue
 
-        log.info(f"[{model.name}] downloading from {model.source}")
+        log.info(f"downloading [{model.name}] from {model.source}")
         command = ["wget", "-q", "--show-progress", "-O", str(local_path), model.source]
 
         try:
@@ -521,13 +520,12 @@ def _validate_corpus_local_path(corpus_name: str, source: str) -> None:
 def install_corpora(corpora: list[CorpusConfig]) -> None:
 
     perplexity_dir.mkdir(parents=True, exist_ok=True)
-    log.info("Installing corpora...")
 
     for corpus in corpora:
         local_path = perplexity_dir / f"{corpus.name}.txt"
 
         if local_path.exists() or local_path.is_symlink():
-            log.info(f"[{corpus.name}] already installed, skipping.")
+            log.info(f"[{corpus.name}] installation verified.")
             continue
 
         # local file
@@ -546,7 +544,7 @@ def install_corpora(corpora: list[CorpusConfig]) -> None:
         is_zip = corpus.source.lower().endswith(".zip")
         download_target = perplexity_dir / (f"{corpus.name}.zip" if is_zip else f"{corpus.name}.txt")
 
-        log.info(f"[{corpus.name}] downloading from {corpus.source}")
+        log.info(f"downloading [{corpus.name}] from {corpus.source}")
 
         try:
             subprocess.run(["wget", "-q", "--show-progress", "-O", str(download_target), corpus.source],check=True)
