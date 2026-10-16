@@ -24,22 +24,24 @@ PERFORMANCE_FIELDS = [
     "measurement_timestamp",
     "engine",
     "model",
-    "prompt",
+    "fa",
+    "model_load_time_ms",
+    "prompt_label",
+    "token_count",
     "ctx",
     "threads",
     "repeat",
-    "sample_count",
 
     # Prefill performance
+    "prefill_batch_size",
     "prefill_tps",
     "prefill_ms",
-    "prefill_tps_stddev",
 
     # Generation performance
     "gen_tokens",
     "gen_tps",
-    "gen_tps_stddev",
     "ttft_ms",
+    "tpot_ms",
 
     # CPU/RAM
     "cpu_pct",
@@ -51,6 +53,15 @@ PERFORMANCE_FIELDS = [
     "type_v",
     "kv_used_mb",
     "kv_utilisation",
+
+    "cpu_temp_c",
+    "avg_power_w",
+    "peak_power_w",
+    "energy_j_per_token",
+    "avg_mbu_pct",
+    "peak_mbu_pct",
+
+    "sample_count",
 ]
 
 MODEL_INFO_FIELDS = [
@@ -60,9 +71,12 @@ MODEL_INFO_FIELDS = [
     "measurement_timestamp",
     "engine",
     "model",
+    "model_sha256",
+    "vocab_size",
     "architecture",
     "context_length_trained",
     "embedding_length",
+    "model_quantization",
     "n_layer",
     "n_head",
     "n_head_kv",
@@ -76,6 +90,29 @@ MODEL_INFO_FIELDS = [
     "kv_alloc_mb",
 ]
 
+HARDWARE_INFO_FIELDS = [
+    "run_id",
+    "run_timestamp",
+    "hostname",
+    "os_name",
+    "os_version",
+    "kernel_version",
+    "python_version",
+    "cpu_model",
+    "cpu_arch",
+    "cpu_cores_physical",
+    "cpu_cores_logical",
+    "cpu_features",
+    "cpu_midr_el1",
+    "cpu_sve_vector_length_bits",
+    "total_ram_mb",
+    "total_swap_mb",
+    "l1d_cache_kb",
+    "l1i_cache_kb",
+    "l2_cache_kb",
+    "l3_cache_kb"
+]
+
 PERPLEXITY_FIELDS = [
     "run_id",
     "run_timestamp",
@@ -83,9 +120,11 @@ PERPLEXITY_FIELDS = [
     "engine",
     "model",
     "corpus",
+    "corpus_token_count",
     "chunks",
     "ctx",
     "perplexity",
+    "perplexity_stddev"
 ]
 
 THREAD_FIELDS = [
@@ -96,21 +135,31 @@ THREAD_FIELDS = [
     "model",
     "thread_scaling_tokens",
     "threads",
+    "token_count",
+    "prefill_batch_size",
     "prefill_tps",
-    "gen_tps"
+    "gen_tps",
+    "ttft_ms",
+    "tpot_ms",
+    "energy_j_per_token",
+    "avg_power_w"
 ]
 
 SAMPLES_FIELDS = [
     "run_id",
     "run_timestamp",
-    "sample_timestamp_ns",
+    "monotonic_timestamp_ns",
     "engine",
     "model",
-    "prompt",
+    "prompt_label",
+    "token_count",
     "repeat",
     "phase",
     "rss_mb",
     "cpu_pct",
+    "cpu_temp_c",
+    "power_w",
+    "mbu_pct",
     "sample_count"
 ]
 

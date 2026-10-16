@@ -87,6 +87,7 @@ class ResourceSampler:
             if self.mode is SamplingMode.SNAPSHOT:
                 self._samples.append((ts, rss, cpu))
             else:
+                assert self._csv_writer is not None
                 self._csv_writer.writerow([
                     self.run_id, self.run_timestamp, ts,
                     self.engine_name, self.model_name, self.prompt, self.repeat, self.phase,
