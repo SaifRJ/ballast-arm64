@@ -329,21 +329,19 @@ def measure_generation(llm: Llama, prompt_tokens: list[int], n_generated_tokens:
     ttft_end = time.perf_counter_ns()
     llm.eval([first_token])
 
-    gen_start = time.perf_counter_ns()
+    token_times_ns = []
     for _ in range(n_generated_tokens - 1):
+        t0 = time.perf_counter_ns()
         token = llm.sample()
         llm.eval([token])
+        token_times_ns.append(time.perf_counter_ns() - t0)
 
-    gen_end = time.perf_counter_ns()
-
-    gen_ms = (gen_end - gen_start) / 1_000_000
-    if gen_ms == 0 or n_generated_tokens <= 1:
-        return {"gen_tps": None, "ttft_ms": None}
-
-    gen_tps = round((n_generated_tokens - 1) / (gen_ms / 1000), 6)
+    gen_ms = sum(token_times_ns) / 1_000_000
+    gen_tps = round((n_generated_tokens - 1) / (gen_ms / 1000), 6) if gen_ms > 0 else None
     ttft_ms = round((ttft_end - ttft_start) / 1_000_000, 3)
+    tpot_ms = round(sum(token_times_ns) / len(token_times_ns) / 1_000_000, 3) if token_times_ns else None
 
-    return {"gen_tps": gen_tps, "ttft_ms": ttft_ms}
+    return {"gen_tps": gen_tps, "ttft_ms": ttft_ms, "tpot_ms": tpot_ms}
 
 
 def compute_kv_alloc(model_info: dict, model: ModelConfig) -> float | None:
@@ -479,11 +477,10 @@ def record_performance(engine: EngineConfig, model: ModelConfig, runtime: Runtim
         "sample_count": ram_cpu.get("sample_count") if ram_cpu else None,
         "prefill_tps": prefill_metrics.get("prefill_tps") if prefill_metrics else None,
         "prefill_ms": prefill_metrics.get("prefill_ms") if prefill_metrics else None,
-        # "prefill_tps_stddev": metrics.get("prefill_tps_stddev"),
         "gen_tokens": model.generated_tokens,
         "gen_tps": generation_metrics.get("gen_tps") if generation_metrics else None,
-        # "gen_tps_stddev": .get("gen_tps_stddev"),
         "ttft_ms": generation_metrics.get("ttft_ms") if generation_metrics else None,
+        "tpot_ms": generation_metrics.get("tpot_ms") if generation_metrics else None,
         "cpu_pct": ram_cpu.get("cpu_pct") if ram_cpu else None,
         "avg_ram_mb": ram_cpu.get("avg_ram_mb") if ram_cpu else None,
         "peak_ram_mb": ram_cpu.get("peak_ram_mb") if ram_cpu else None,
