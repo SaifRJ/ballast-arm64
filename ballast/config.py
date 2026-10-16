@@ -5,6 +5,7 @@ import llama_cpp # type: ignore
 import logging
 import yaml
 import uuid
+import os
 
 def run_time():
     return datetime.now().astimezone()
@@ -17,8 +18,8 @@ prompts_dir = repo_root / "eval" / "prompts"
 perplexity_dir = repo_root / "eval" / "perplexity"
 results_dir = repo_root / "results"
 models_dir = repo_root / "models"
-run_timestamp = (run_time()).strftime("%Y-%m-%d_%H-%M")
-run_id = str(uuid.uuid4())
+run_timestamp = os.environ.get("BALLAST_RUN_TIMESTAMP") or (run_time()).strftime("%Y-%m-%d_%H-%M")
+run_id = os.environ.get("BALLAST_RUN_ID") or str(uuid.uuid4())
 run_folder = results_dir / f"Benchmark_{run_timestamp}"
 
 REQUIRED_BINARIES = ["llama-perplexity"]
