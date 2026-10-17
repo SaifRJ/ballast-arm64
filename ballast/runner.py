@@ -42,7 +42,7 @@ def run_engine_benchmark(engine_name: str) -> None:
     for model in models:
 
         # Returns a Llama object instance the caller owns for the lifetime of the model's benchmark run
-        llm = bm.load_engine(model, runtime_yaml)
+        llm, model_load_time = bm.load_engine(model, runtime_yaml)
 
         # Run a small inference to avoid first-call cost from affecting measurements
         bm.warmup_engine(llm) 
@@ -87,12 +87,8 @@ def run_engine_benchmark(engine_name: str) -> None:
 
             for repeat_number in range(1, pipeline_yaml.repeats + 1):
 
-                prefill_metrics = None
-                generation_metrics = None
-                ram_cpu = None
-                kv_usage = None
 
-                log.info(f"{model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
+                log.info(f"benchmarking {model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
 
                 sampler_csv_path = bm.ensure_csv(bm.SAMPLES_FIELDS, f"samples_{engine.name}.csv") if pipeline_yaml.mode is SamplingMode.SAMPLED else None
                 with ResourceSampler(
@@ -138,7 +134,7 @@ def run_engine_benchmark(engine_name: str) -> None:
                     kv_usage = bm.read_kv_usage(llm, kv_alloc, model)
 
                 # Append performance metric values to performance_{engine_name}.csv file output
-                bm.record_performance(engine, model, runtime_yaml, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, run_id, run_timestamp)
+                bm.record_performance(engine, model, runtime_yaml, prompt, repeat_number, prefill_metrics, generation_metrics, ram_cpu, kv_usage, model_load_time, prompt_token_ids, run_id, run_timestamp)
 
         # Append model info and architecture detail to model_info_{engine_name}.csv file output 
         bm.record_model_info(engine, model, model_info, kv_alloc, run_id, run_timestamp)

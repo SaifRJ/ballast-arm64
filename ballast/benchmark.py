@@ -47,6 +47,7 @@ PERFORMANCE_FIELDS = [
     "cpu_pct",
     "avg_ram_mb",
     "peak_ram_mb",
+    "ram_cpu_sample_count",
 
     # KV cache
     "type_k",
@@ -60,8 +61,6 @@ PERFORMANCE_FIELDS = [
     "energy_j_per_token",
     "avg_mbu_pct",
     "peak_mbu_pct",
-
-    "sample_count",
 ]
 
 MODEL_INFO_FIELDS = [
@@ -119,7 +118,7 @@ PERPLEXITY_FIELDS = [
     "measurement_timestamp",
     "engine",
     "model",
-    "corpus",
+    "corpus_label",
     "corpus_token_count",
     "chunks",
     "ctx",
@@ -192,10 +191,14 @@ def load_engine(model: ModelConfig, runtime: RuntimeConfig) -> Llama:
     if model.cache_type_k:
         kwargs["type_k"] = KV_TYPE_MAP[model.cache_type_k]
 
-    if  model.cache_type_v:
+    if model.cache_type_v:
         kwargs["type_v"] = KV_TYPE_MAP[model.cache_type_v]
 
-    return Llama(**kwargs)
+    start = time.perf_counter_ns()
+    llm = Llama(**kwargs)
+    model_load_time_ms = round((time.perf_counter_ns() - start) / 1_000_000, 3)
+
+    return llm, model_load_time_ms
 
 
 def warmup_engine(llm: Llama) -> None:
@@ -274,11 +277,12 @@ def append_row(csv_path: Path, csv_fields: list[str], row_values: dict) -> None:
 
 def snapshot_manifests(engines: list[EngineConfig]) -> None:
 
-    run_folder.mkdir(parents=True, exist_ok=True)
+    engine_manifests_dir = run_folder / "engine_manifests"
+    engine_manifests_dir.mkdir(parents=True, exist_ok=True)
 
     for engine in engines:
         src = engines_dir / engine.name / "manifest.json"
-        dst = run_folder / f"{engine.name}_manifest.json"
+        dst = engine_manifests_dir / f"{engine.name}_manifest.json"
         shutil.copy2(src, dst)
 
 
@@ -298,7 +302,7 @@ def tokenize_prompt(llm: Llama, prompt_text: str) -> list[int]:
 
 
 def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
-
+    
     llm.reset()
 
     n_prefill = len(prompt_tokens)
@@ -314,8 +318,8 @@ def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
     if prefill_ms == 0:
         log.warning(f"measure_prefill got zero elapsed time ({n_prefill} tokens).")
         return {"prefill_tps": None, "prefill_ms": None}
-
     prefill_tps = round(n_prefill / (prefill_ms / 1000), 6)
+
     return {"prefill_tps": prefill_tps, "prefill_ms": round(prefill_ms, 3)}
 
 
@@ -373,17 +377,17 @@ def read_kv_usage(llm: Llama, kv_alloc_mb: float | None, model: ModelConfig) -> 
     return {"kv_used_mb": kv_used_mb, "kv_utilisation": util}
 
 
-def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str) -> float | None:
+def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str) -> tuple[float, float] | tuple[None, None]:
 
     llama_perplexity = get_binary("llama-perplexity", engine_name)
 
     if not corpus.local_path:
-        log.error(f"Corpus '{corpus.name}' was not installed. Perplexity cannot be measured.")
-        return None
+        log.error(f"Corpus '{corpus.name}' was not found or installed. Perplexity cannot be measured.")
+        return None, None
 
     if not corpus.local_path.exists():
        log.error(f"Corpus file missing at {corpus.local_path}.")
-       return None
+       return None, None
 
     command = [llama_perplexity, "-m", str(model.local_path),"-f", str(corpus.local_path)]
 
@@ -392,9 +396,14 @@ def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: st
 
     result = subprocess.run(command, capture_output=True, text=True, check=False)
 
-    matches = re.findall(r"PPL\s*=\s*([\d.]+)", result.stderr) or re.findall(r"PPL\s*=\s*([\d.]+)", result.stdout)
+    pattern = r"PPL\s*=\s*([\d.]+)\s*(?:\+/-|±)\s*([\d.]+)"
+    matches = re.findall(pattern, result.stderr) or re.findall(pattern, result.stdout)
 
-    return float(matches[-1]) if matches else None
+    if matches:
+        ppl, ppl_stddev = matches[-1]
+        return float(ppl), float(ppl_stddev)
+    else:
+        return None, None
 
 
 def get_thread_list(setting: list[int] | str | bool) -> list[int]:
@@ -436,7 +445,7 @@ def measure_thread_scaling(model: ModelConfig, runtime: RuntimeConfig, thread_li
             runtime.n_threads_batch = threads
 
 
-            llm = load_engine(model, runtime)
+            llm, _ = load_engine(model, runtime)
             warmup_engine(llm)
 
             # Synthesise scaling prompt from a reference string
@@ -448,6 +457,7 @@ def measure_thread_scaling(model: ModelConfig, runtime: RuntimeConfig, thread_li
 
             prefill = measure_prefill(llm, scaling_tokens)
             generation = measure_generation(llm, scaling_tokens, model.generated_tokens)
+
             del llm
 
             scaling.append((threads, prefill.get("prefill_tps"), generation.get("gen_tps")))
@@ -460,40 +470,62 @@ def measure_thread_scaling(model: ModelConfig, runtime: RuntimeConfig, thread_li
 
 
 def record_performance(engine: EngineConfig, model: ModelConfig, runtime: RuntimeConfig, prompt: str, repeat_number: int,
-                       prefill_metrics: dict | None, generation_metrics: dict | None, ram_cpu: dict | None, kv_usage: dict | None, run_id: str, run_timestamp: str) -> None:
+                       prefill_metrics: dict | None, generation_metrics: dict | None, ram_cpu: dict | None, kv_usage: dict | None, 
+                       model_load_time: float | None, prompt_tokens: list, run_id: str, run_timestamp: str) -> None:
 
-    csv_path = ensure_csv(PERFORMANCE_FIELDS, f"perf_snapshot_{engine.name}.csv")
+    csv_path = ensure_csv(PERFORMANCE_FIELDS, f"perf_snapshot.csv")
     
     append_row(csv_path, PERFORMANCE_FIELDS, {
+        # Run / workload
         "run_id": run_id,
         "run_timestamp": run_timestamp,
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine.name,
         "model": model.name,
-        "prompt": prompt,
+        "fa": bool(model.fa),
+        "model_load_time_ms": model_load_time,
+        "prompt_label": prompt,
+        "token_count": len(prompt_tokens) if prompt_tokens else None,
         "ctx": model.context_size,
         "threads": resolve_thread_count(runtime.n_threads),
         "repeat": repeat_number,
-        "sample_count": ram_cpu.get("sample_count") if ram_cpu else None,
+
+        # Prefill performance
+        "prefill_batch_size": model.batch_size,
         "prefill_tps": prefill_metrics.get("prefill_tps") if prefill_metrics else None,
         "prefill_ms": prefill_metrics.get("prefill_ms") if prefill_metrics else None,
-        "gen_tokens": model.generated_tokens,
+
+        # Generation performance
+        "gen_tokens": model.generated_tokens if generation_metrics else None,
         "gen_tps": generation_metrics.get("gen_tps") if generation_metrics else None,
         "ttft_ms": generation_metrics.get("ttft_ms") if generation_metrics else None,
         "tpot_ms": generation_metrics.get("tpot_ms") if generation_metrics else None,
+
+        # CPU / RAM
         "cpu_pct": ram_cpu.get("cpu_pct") if ram_cpu else None,
         "avg_ram_mb": ram_cpu.get("avg_ram_mb") if ram_cpu else None,
         "peak_ram_mb": ram_cpu.get("peak_ram_mb") if ram_cpu else None,
+        "ram_cpu_sample_count": ram_cpu.get("sample_count") if ram_cpu else None,
+
+        # KV cache
         "type_k": model.cache_type_k.value if model.cache_type_k else None,
         "type_v": model.cache_type_v.value if model.cache_type_v else None,
         "kv_used_mb": kv_usage.get("kv_used_mb") if kv_usage else None,
-        "kv_utilisation": kv_usage.get("kv_utilisation") if kv_usage else None
+        "kv_utilisation": kv_usage.get("kv_utilisation") if kv_usage else None,
+
+        # Hardware telemetry
+        "cpu_temp_c": None,
+        "avg_power_w": None,
+        "peak_power_w": None,
+        "energy_j_per_token": None,
+        "avg_mbu_pct": None,
+        "peak_mbu_pct": None
     })
 
 
 def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict, kv_alloc: float | None, run_id: str, run_timestamp: str) -> None:
 
-    csv_path = ensure_csv(MODEL_INFO_FIELDS, f"model_info_{engine.name}.csv")
+    csv_path = ensure_csv(MODEL_INFO_FIELDS, f"model_info.csv")
 
     append_row(csv_path, MODEL_INFO_FIELDS, {
         "run_id": run_id,
@@ -518,9 +550,9 @@ def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict
     })
 
 
-def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: float | None, run_id: str, run_timestamp: str) -> None:
+def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: tuple[float, float] | tuple[None, None], run_id: str, run_timestamp: str) -> None:
 
-    csv_path = ensure_csv(PERPLEXITY_FIELDS, f"perplexity_{engine.name}.csv")
+    csv_path = ensure_csv(PERPLEXITY_FIELDS, f"perplexity.csv")
 
     append_row(csv_path, PERPLEXITY_FIELDS, {
         "run_id": run_id,
@@ -528,16 +560,17 @@ def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusCo
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine.name,
         "model": model.name,
-        "corpus": corpus.name,
+        "corpus_label": corpus.name,
         "chunks": corpus.chunks,
         "ctx": model.context_size,
-        "perplexity": perplexity
+        "perplexity": perplexity[0],
+        "perplexity_stddev": perplexity[1]
     })
 
 
 def record_thread_scaling(engine: EngineConfig, model: ModelConfig, token_count: int, scaling: list[tuple], run_id: str, run_timestamp: str) -> None:
 
-    csv_path = ensure_csv(THREAD_FIELDS, f"thread_scaling_{engine.name}.csv")
+    csv_path = ensure_csv(THREAD_FIELDS, f"thread_scaling.csv")
 
     for threads, prefill_tps, gen_tps in scaling:
         append_row(csv_path, THREAD_FIELDS, {
