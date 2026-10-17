@@ -190,7 +190,7 @@ def setup_logger():
     stream.setFormatter(fmt)
     logger.addHandler(stream)
 
-    file = logging.FileHandler(run_folder / "run_output_log.log")
+    file = logging.FileHandler(run_folder / "run_log.log")
     file.setLevel(logging.DEBUG)
     file.setFormatter(fmt)
     logger.addHandler(file)
