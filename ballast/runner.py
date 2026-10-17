@@ -87,12 +87,8 @@ def run_engine_benchmark(engine_name: str) -> None:
 
             for repeat_number in range(1, pipeline_yaml.repeats + 1):
 
-                prefill_metrics = None
-                generation_metrics = None
-                ram_cpu = None
-                kv_usage = None
 
-                log.info(f"{model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
+                log.info(f"benchmarking {model.name} / {prompt}: Repeat {repeat_number}/{pipeline_yaml.repeats}")
 
                 sampler_csv_path = bm.ensure_csv(bm.SAMPLES_FIELDS, f"samples_{engine.name}.csv") if pipeline_yaml.mode is SamplingMode.SAMPLED else None
                 with ResourceSampler(

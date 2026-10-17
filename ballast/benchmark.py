@@ -118,7 +118,7 @@ PERPLEXITY_FIELDS = [
     "measurement_timestamp",
     "engine",
     "model",
-    "corpus",
+    "corpus_label",
     "corpus_token_count",
     "chunks",
     "ctx",
@@ -277,11 +277,12 @@ def append_row(csv_path: Path, csv_fields: list[str], row_values: dict) -> None:
 
 def snapshot_manifests(engines: list[EngineConfig]) -> None:
 
-    run_folder.mkdir(parents=True, exist_ok=True)
+    engine_manifests_dir = run_folder / "engine_manifests"
+    engine_manifests_dir.mkdir(parents=True, exist_ok=True)
 
     for engine in engines:
         src = engines_dir / engine.name / "manifest.json"
-        dst = run_folder / f"{engine.name}_manifest.json"
+        dst = engine_manifests_dir / f"{engine.name}_manifest.json"
         shutil.copy2(src, dst)
 
 
@@ -301,7 +302,7 @@ def tokenize_prompt(llm: Llama, prompt_text: str) -> list[int]:
 
 
 def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
-
+    
     llm.reset()
 
     n_prefill = len(prompt_tokens)
@@ -317,8 +318,8 @@ def measure_prefill(llm: Llama, prompt_tokens: list[int]) -> dict:
     if prefill_ms == 0:
         log.warning(f"measure_prefill got zero elapsed time ({n_prefill} tokens).")
         return {"prefill_tps": None, "prefill_ms": None}
-
     prefill_tps = round(n_prefill / (prefill_ms / 1000), 6)
+
     return {"prefill_tps": prefill_tps, "prefill_ms": round(prefill_ms, 3)}
 
 
@@ -376,17 +377,17 @@ def read_kv_usage(llm: Llama, kv_alloc_mb: float | None, model: ModelConfig) -> 
     return {"kv_used_mb": kv_used_mb, "kv_utilisation": util}
 
 
-def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str) -> float | None:
+def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str) -> tuple[float, float] | tuple[None, None]:
 
     llama_perplexity = get_binary("llama-perplexity", engine_name)
 
     if not corpus.local_path:
-        log.error(f"Corpus '{corpus.name}' was not installed. Perplexity cannot be measured.")
-        return None
+        log.error(f"Corpus '{corpus.name}' was not found or installed. Perplexity cannot be measured.")
+        return None, None
 
     if not corpus.local_path.exists():
        log.error(f"Corpus file missing at {corpus.local_path}.")
-       return None
+       return None, None
 
     command = [llama_perplexity, "-m", str(model.local_path),"-f", str(corpus.local_path)]
 
@@ -395,9 +396,14 @@ def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: st
 
     result = subprocess.run(command, capture_output=True, text=True, check=False)
 
-    matches = re.findall(r"PPL\s*=\s*([\d.]+)", result.stderr) or re.findall(r"PPL\s*=\s*([\d.]+)", result.stdout)
+    pattern = r"PPL\s*=\s*([\d.]+)\s*(?:\+/-|±)\s*([\d.]+)"
+    matches = re.findall(pattern, result.stderr) or re.findall(pattern, result.stdout)
 
-    return float(matches[-1]) if matches else None
+    if matches:
+        ppl, ppl_stddev = matches[-1]
+        return float(ppl), float(ppl_stddev)
+    else:
+        return None, None
 
 
 def get_thread_list(setting: list[int] | str | bool) -> list[int]:
@@ -544,7 +550,7 @@ def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict
     })
 
 
-def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: float | None, run_id: str, run_timestamp: str) -> None:
+def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: tuple[float, float] | tuple[None, None], run_id: str, run_timestamp: str) -> None:
 
     csv_path = ensure_csv(PERPLEXITY_FIELDS, f"perplexity.csv")
 
@@ -554,10 +560,11 @@ def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusCo
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine.name,
         "model": model.name,
-        "corpus": corpus.name,
+        "corpus_label": corpus.name,
         "chunks": corpus.chunks,
         "ctx": model.context_size,
-        "perplexity": perplexity
+        "perplexity": perplexity[0],
+        "perplexity_stddev": perplexity[1]
     })
 
 
