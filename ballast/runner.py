@@ -69,7 +69,7 @@ def run_engine_benchmark(engine_name: str) -> None:
             for corpus in corpora:
 
                 # Measure perplexity per model per corpus
-                perplexity = bm.measure_perplexity(model, corpus, engine.name)
+                perplexity = bm.measure_perplexity(model, corpus, engine.name, runtime_yaml)
 
                 # Append ppl values to perplexity_{engine_name}.csv file output
                 bm.record_perplexity(engine, model, corpus, perplexity, run_id, run_timestamp)

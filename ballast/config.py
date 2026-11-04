@@ -94,6 +94,7 @@ def _corpus_from_dict(raw: dict) -> CorpusConfig:
         name=raw["name"],
         source=raw["source"],
         chunks=raw["chunks"],
+        ctx=raw.get("ctx", 512)
     )
 
 

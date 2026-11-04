@@ -376,33 +376,61 @@ def read_kv_usage(llm: Llama, kv_alloc_mb: float | None, model: ModelConfig) -> 
     return {"kv_used_mb": kv_used_mb, "kv_utilisation": util}
 
 
-def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str) -> tuple[float, float] | tuple[None, None]:
+def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str, runtime: RuntimeConfig) -> dict:
 
+    empty = {"perplexity": None, "perplexity_stddev": None, "chunks": None, "ctx": None, "corpus_token_count": None}
     llama_perplexity = get_binary("llama-perplexity", engine_name)
 
-    if not corpus.local_path:
-        log.error(f"Corpus '{corpus.name}' was not found or installed. Perplexity cannot be measured.")
-        return None, None
+    if not corpus.local_path or not corpus.local_path.exists():
+        log.error(f"Corpus '{corpus.name}' missing. Perplexity cannot be measured.")
+        return empty
 
-    if not corpus.local_path.exists():
-       log.error(f"Corpus file missing at {corpus.local_path}.")
-       return None, None
+    command = [
+        llama_perplexity,
+        "-m", str(model.local_path),
+        "-f", str(corpus.local_path),
+        "-c", str(corpus.ctx),
+        "-b", str(model.batch_size),
+        "-t", str(resolve_thread_count(runtime.n_threads)),
+        "-tb", str(resolve_thread_count(runtime.n_threads_batch)),
+        "-fa", "on" if model.fa else "off",
+    ]
 
-    command = [llama_perplexity, "-m", str(model.local_path),"-f", str(corpus.local_path)]
+    if model.cache_type_k:
+        command.extend(["-ctk", model.cache_type_k.value])
+
+    if model.cache_type_v:
+        command.extend(["-ctv", model.cache_type_v.value])
 
     if corpus.chunks != "all":
         command.extend(["--chunks", str(corpus.chunks)])
 
+    log.info(f"measuring perplexity for [{model.name}] / {corpus.name} on {engine_name} (using llama-perplexity)")
     result = subprocess.run(command, capture_output=True, text=True, check=False)
+    output = result.stderr + result.stdout
 
-    pattern = r"PPL\s*=\s*([\d.]+)\s*(?:\+/-|±)\s*([\d.]+)"
-    matches = re.findall(pattern, result.stderr) or re.findall(pattern, result.stdout)
+    if result.returncode != 0:
+        log.error(f"llama-perplexity failed for {model.name}/{corpus.name} (exit {result.returncode}).")
+        return empty
 
-    if matches:
-        ppl, ppl_stddev = matches[-1]
-        return float(ppl), float(ppl_stddev)
-    else:
-        return None, None
+    ppl_matches = re.findall(r"PPL\s*=\s*([\d.]+)\s*(?:\+/-|±)\s*([\d.]+)", output)
+    run_match = re.search(r"calculating perplexity over (\d+) chunks, n_ctx=(\d+)", output)
+
+    if not ppl_matches:
+        return empty
+
+    ppl, ppl_stddev = ppl_matches[-1]
+    chunks_used = int(run_match.group(1)) if run_match else None
+    ctx_used = int(run_match.group(2)) if run_match else None
+
+    return {
+        "perplexity": float(ppl),
+        "perplexity_stddev": float(ppl_stddev),
+        "chunks": chunks_used,
+        "ctx": ctx_used,
+        "corpus_token_count": chunks_used * ctx_used if chunks_used and ctx_used else None,
+    }
+        
 
 
 def get_thread_list(setting: list[int] | str | bool) -> list[int]:
@@ -549,7 +577,7 @@ def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict
     })
 
 
-def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: tuple[float, float] | tuple[None, None], run_id: str, run_timestamp: str) -> None:
+def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusConfig, perplexity: dict, run_id: str, run_timestamp: str) -> None:
 
     csv_path = ensure_csv(PERPLEXITY_FIELDS, f"perplexity.csv")
 
@@ -560,10 +588,11 @@ def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusCo
         "engine": engine.name,
         "model": model.name,
         "corpus_label": corpus.name,
-        "chunks": corpus.chunks,
-        "ctx": model.context_size,
-        "perplexity": perplexity[0],
-        "perplexity_stddev": perplexity[1]
+        "corpus_token_count": perplexity["corpus_token_count"],
+        "chunks": perplexity["chunks"],
+        "ctx": perplexity["ctx"],
+        "perplexity": perplexity["perplexity"],
+        "perplexity_stddev": perplexity["perplexity_stddev"],
     })
 
 
