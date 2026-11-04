@@ -102,7 +102,8 @@ def run_engine_benchmark(engine_name: str) -> None:
                     model_name=model.name,
                     prompt=prompt,
                     repeat=repeat_number,
-                    phase="combined") as sampler:
+                    phase="combined",
+                    token_count=len(prompt_token_ids)) as sampler:
 
                     if Metric.PREFILL in metrics_yaml.enabled:
 
