@@ -2,7 +2,7 @@
 
 # What engine(s) do you want to use?
 engines:
-  - name: kleidiai_build # Specify the name of the engine. This will be used to create a folder in the output_dir for this engine's results.
+  - name: kleidiai_build # Give your engine a distinct name.
     source: https://github.com/ggml-org/llama.cpp # Specify the source of the engine. This can be a GitHub/Hugging Face repo or a local file path.
     tag: b10327 # Specify the tag/commit of the engine to use.
     cmake_flags: { GGML_NATIVE: ON, GGML_CPU_KLEIDIAI: ON } # Specify any CMake flags to use when building the engine.
@@ -15,7 +15,7 @@ engines:
 # What models do you want to benchmark?
 # Note: if you are specifying a local file path as source, the name field MUST match the file name. 
 models:
-  - name: TinyLlama
+  - name: TinyLlama # Give your model a distinct name.
     source: https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     context_size: 2048 # How many tokens to use for the context window when generating tokens
     cache_type_k: q8_0 # Specify what key quantization type to use for the model cache. Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, bf16, f32, iq4_nl
@@ -38,9 +38,10 @@ models:
 # Specify a corpus, or several, to test perplexity per model. Perplexity will not be measured if this section is empty.
 # Perplexity is a language-modelling metric (how well the model predicts tokens based on the content of the corpus).
 corpora:
-  - name: wikitext-2 
-    source: https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip
-    chunks: 40
+  - name: wikitext-2 # Give your corpus a distinct name.
+    source: https://huggingface.co/datasets/ggml-org/ci/resolve/main/wikitext-2-raw-v1.zip # Specify the source of the corpus. This can be a GitHub/Hugging Face repo or a local file path.
+    chunks: 40 # Specify how many chunks of the corpus to use for perplexity measurement. Set to "all" to use all chunks in the corpus.
+    ctx: 512 # Specify the context size to use for perplexity measurement. The default is 512 tokens.
 
 runtime:
   n_threads: auto # Specify how many threads to use (via os.cpu_count) at inference time. If set to auto, will use the maximum number of threads available. 

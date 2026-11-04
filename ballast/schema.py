@@ -61,6 +61,7 @@ class CorpusConfig:
     name: str
     source: str
     chunks: int | str
+    ctx: int = 512
     local_path: Path | None = None
 
 
