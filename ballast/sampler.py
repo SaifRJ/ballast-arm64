@@ -16,7 +16,7 @@ log = logging.getLogger("ballast")
 
 class ResourceSampler:
 
-    def __init__(self, pid: int | None = None, interval_ms: int = 100, mode: SamplingMode = SamplingMode.SNAPSHOT, csv_path: Path | None = None, tag: str | None = None, run_id: str = "", run_timestamp: str = "", engine_name: str = "", model_name: str = "", prompt: str = "", repeat: int = 0, phase: str = ""):
+    def __init__(self, pid: int | None = None, interval_ms: int = 100, mode: SamplingMode = SamplingMode.SNAPSHOT, csv_path: Path | None = None, tag: str | None = None, run_id: str = "", run_timestamp: str = "", engine_name: str = "", model_name: str = "", prompt: str = "", repeat: int = 0, phase: str = "", token_count: int = 0):
 
         self.pid: int = pid if pid is not None else os.getpid()
         self.interval_s: float = interval_ms / 1000.0
@@ -38,6 +38,7 @@ class ResourceSampler:
         self.prompt = prompt
         self.repeat = repeat
         self.phase = phase
+        self.token_count = token_count
 
     def __enter__(self) -> "ResourceSampler":
         self.start()
@@ -51,8 +52,7 @@ class ResourceSampler:
         self._proc.cpu_percent(interval=None)
 
         if self.mode is SamplingMode.SAMPLED:
-            if self.csv_path is None:
-                raise ValueError("sampled mode requires csv_path")
+            assert self.csv_path is not None
             self._csv_file = open(self.csv_path, "a", newline="")
             self._csv_writer = csv.writer(self._csv_file)
 
@@ -89,9 +89,20 @@ class ResourceSampler:
             else:
                 assert self._csv_writer is not None
                 self._csv_writer.writerow([
-                    self.run_id, self.run_timestamp, ts,
-                    self.engine_name, self.model_name, self.prompt, self.repeat, self.phase,
-                    round(rss / (1024**2), 2), cpu
+                    self.run_id, 
+                    self.run_timestamp, 
+                    ts,
+                    self.engine_name, 
+                    self.model_name, 
+                    self.prompt, 
+                    self.token_count,
+                    self.repeat, 
+                    self.phase,
+                    round(rss / (1024**2), 2), 
+                    cpu,
+                    "NA", # cpu_temp_c
+                    "NA", # power_w
+                    "NA" # mbu_pct (not yet implemented)
                 ])
 
             self._stop.wait(self.interval_s)
@@ -108,5 +119,6 @@ class ResourceSampler:
         return {
             "peak_ram_mb": round(max(rss_values) / (1024**2), 2),
             "avg_ram_mb": round((sum(rss_values) / len(rss_values)) / (1024**2), 2),
-            "cpu_pct": round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else 0
+            "cpu_pct": round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else 0,
+            "sample_count": len(self._samples)
         }

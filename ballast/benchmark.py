@@ -158,8 +158,7 @@ SAMPLES_FIELDS = [
     "cpu_pct",
     "cpu_temp_c",
     "power_w",
-    "mbu_pct",
-    "sample_count"
+    "mbu_pct"
 ]
 
 def get_binary(binary_name: str, engine_name: str) -> str:
