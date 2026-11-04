@@ -52,7 +52,8 @@ PERFORMANCE_FIELDS = [
     # KV cache
     "type_k",
     "type_v",
-    "kv_used_mb",
+    "k_used_mb",
+    "v_used_mb",
     "kv_utilisation",
 
     "cpu_temp_c",
@@ -86,7 +87,9 @@ MODEL_INFO_FIELDS = [
     "value_length",
     "model_size_bytes",
     "model_n_params",
-    "kv_alloc_mb",
+    "sliding_window",
+    "k_alloc_mb",
+    "v_alloc_mb"
 ]
 
 HARDWARE_INFO_FIELDS = [
@@ -352,7 +355,7 @@ def measure_generation(llm: Llama, prompt_tokens: list[int], n_generated_tokens:
     return {"gen_tps": gen_tps, "ttft_ms": ttft_ms, "tpot_ms": tpot_ms}
 
 
-def compute_kv_alloc(model_info: dict, model: ModelConfig) -> float | None:
+def compute_kv_alloc(model_info: dict, model: ModelConfig) -> dict | None:
     try:
         if model_info.get("sliding_window") and not model.swa_full:
             log.warning(
@@ -363,28 +366,31 @@ def compute_kv_alloc(model_info: dict, model: ModelConfig) -> float | None:
         bpe_k = BYTES_PER_ELEM.get(model.cache_type_k or CacheType.F16, 2.0)
         bpe_v = BYTES_PER_ELEM.get(model.cache_type_v or CacheType.F16, 2.0)
 
-        k_bytes = model_info["n_head_kv"] * model_info["key_length"] * bpe_k
-        v_bytes = model_info["n_head_kv"] * model_info["value_length"] * bpe_v
-        per_layer = k_bytes + v_bytes
+        slots = model_info["n_layer"] * model_info["n_head_kv"] * model.context_size
+        k_bytes = slots * model_info["key_length"] * bpe_k
+        v_bytes = slots * model_info["value_length"] * bpe_v
     
-        kv_alloc_mb = round(per_layer * model_info["n_layer"] * model.context_size / (1024**2), 2)
-
     except (KeyError, TypeError):
         return None
 
-    return kv_alloc_mb
+    return {
+        "k_alloc_mb": round(k_bytes / (1024**2), 2),
+        "v_alloc_mb": round(v_bytes / (1024**2), 2)
+    }
 
 
-def read_kv_usage(llm: Llama, kv_alloc_mb: float | None, model: ModelConfig) -> dict:
+def read_kv_usage(llm: Llama, kv_alloc: dict | None, model: ModelConfig) -> dict:
 
-    if kv_alloc_mb is None:
-        return {"kv_used_mb": None, "kv_utilisation": None}
+    if kv_alloc is None:
+        return {"k_used_mb": None, "v_used_mb": None, "kv_utilisation": None}
 
-    tokens_in_cache = llm.n_tokens
-    util = round(tokens_in_cache / model.context_size, 4)
-    kv_used_mb = round(kv_alloc_mb * util, 2)
+    util = llm.n_tokens / model.context_size
 
-    return {"kv_used_mb": kv_used_mb, "kv_utilisation": util}
+    return {
+        "k_used_mb": round(kv_alloc["k_alloc_mb"] * util, 2),
+        "v_used_mb": round(kv_alloc["v_alloc_mb"] * util, 2),
+        "kv_utilisation": round(util, 4),
+    }
 
 
 def measure_perplexity(model: ModelConfig, corpus: CorpusConfig, engine_name: str, runtime: RuntimeConfig) -> dict:
@@ -548,7 +554,8 @@ def record_performance(engine: EngineConfig, model: ModelConfig, runtime: Runtim
         # KV cache
         "type_k": model.cache_type_k.value if model.cache_type_k else None,
         "type_v": model.cache_type_v.value if model.cache_type_v else None,
-        "kv_used_mb": kv_usage.get("kv_used_mb") if kv_usage else None,
+        "k_used_mb": kv_usage.get("k_used_mb") if kv_usage else None,
+        "v_used_mb": kv_usage.get("v_used_mb") if kv_usage else None,
         "kv_utilisation": kv_usage.get("kv_utilisation") if kv_usage else None,
 
         # Hardware telemetry
@@ -561,7 +568,7 @@ def record_performance(engine: EngineConfig, model: ModelConfig, runtime: Runtim
     })
 
 
-def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict, kv_alloc: float | None, run_id: str, run_timestamp: str) -> None:
+def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict, kv_alloc: dict | None, run_id: str, run_timestamp: str) -> None:
 
     csv_path = ensure_csv(MODEL_INFO_FIELDS, f"model_info.csv")
 
@@ -584,7 +591,9 @@ def record_model_info(engine: EngineConfig, model: ModelConfig, model_info: dict
         "value_length": model_info.get("value_length"),
         "model_size_bytes": model_info.get("model_size_bytes"),
         "model_n_params": model_info.get("model_n_params"),
-        "kv_alloc_mb": kv_alloc
+        "sliding_window": model_info.get("sliding_window"),
+        "k_alloc_mb": kv_alloc.get("k_alloc_mb") if kv_alloc else None,
+        "v_alloc_mb": kv_alloc.get("v_alloc_mb") if kv_alloc else None,
     })
 
 
