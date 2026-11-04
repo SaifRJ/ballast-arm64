@@ -54,6 +54,7 @@ def run_engine_benchmark(engine_name: str) -> None:
 
             # Return KV-cache allocation per model
             kv_alloc = bm.compute_kv_alloc(model_info, model)
+            
         else: kv_alloc = None
 
         if Metric.THREAD_SCALING in metrics_yaml.enabled:

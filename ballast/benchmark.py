@@ -185,6 +185,7 @@ def load_engine(model: ModelConfig, runtime: RuntimeConfig) -> Llama:
         "n_batch": model.batch_size,
         "flash_attn": bool(model.fa),
         "verbose": False,
+        "swa_full": model.swa_full
     }
 
     if model.cache_type_k:
@@ -228,8 +229,11 @@ def get_model_info(llm: Llama) -> dict:
 
     n_embd = llm.n_embd()
     n_head = m("attention.head_count", int)
-    key_length = n_embd // n_head if n_head else None
-    value_length = key_length
+    fallback_head_dim = n_embd // n_head if n_head else None
+
+    key_length = m("attention.key_length", int) or fallback_head_dim
+    value_length = m("attention.value_length", int) or key_length
+    sliding_window = m("attention.sliding_window", int)
 
     return {
         "architecture": arch,
@@ -243,8 +247,9 @@ def get_model_info(llm: Llama) -> dict:
         "rope_dimension_count": m("rope.dimension_count", int),
         "key_length": key_length,
         "value_length": value_length,
+        "sliding_window": sliding_window,
         "model_size_bytes": llama_model_size(llm._model.model),
-        "model_n_params": llama_model_n_params(llm._model.model),
+        "model_n_params": llama_model_n_params(llm._model.model)
     }
 
 
@@ -349,6 +354,12 @@ def measure_generation(llm: Llama, prompt_tokens: list[int], n_generated_tokens:
 
 def compute_kv_alloc(model_info: dict, model: ModelConfig) -> float | None:
     try:
+        if model_info.get("sliding_window") and not model.swa_full:
+            log.warning(
+                f"[{model.name}] uses sliding-window attention (window={model_info['sliding_window']}). "
+                f"kv_alloc_mb and kv_used_mb assume full-context caching on every layer and will overstate usage."
+            )
+    
         bpe_k = BYTES_PER_ELEM.get(model.cache_type_k or CacheType.F16, 2.0)
         bpe_v = BYTES_PER_ELEM.get(model.cache_type_v or CacheType.F16, 2.0)
 

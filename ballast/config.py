@@ -34,12 +34,12 @@ BYTES_PER_ELEM = {
     CacheType.F32: 4.0,
     CacheType.F16: 2.0,
     CacheType.BF16: 2.0,
-    CacheType.Q8_0: 1.0,
-    CacheType.Q5_0: 0.625,
-    CacheType.Q5_1: 0.6875,
-    CacheType.Q4_0: 0.5625,
-    CacheType.Q4_1: 0.625,
-    CacheType.IQ4_NL: 0.5625,
+    CacheType.Q8_0: 34 / 32,
+    CacheType.Q5_0: 22 / 32,
+    CacheType.Q5_1: 24 / 32,
+    CacheType.Q4_0: 18 / 32,
+    CacheType.Q4_1: 20 / 32,
+    CacheType.IQ4_NL: 18 / 32
 }
 
 KV_ALLOWED = frozenset(KV_TYPE_MAP.keys())
