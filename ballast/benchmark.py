@@ -1,12 +1,13 @@
+from ballast.platform_adapter import performance_core_count
 from ballast.schema import (EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, CacheType)
-from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM, KV_TYPE_MAP, run_time
+from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM, KV_TYPE_MAP, run_time, hardware_id, cpu_model
 from typing import Callable, Any
 import llama_cpp # type: ignore
 from pathlib import Path
 from llama_cpp import Llama, llama_model_size, llama_model_n_params # type: ignore
 import time
 import subprocess
-import csv
+import csv, json
 import os
 import re
 import shutil
@@ -23,6 +24,8 @@ PERFORMANCE_FIELDS = [
     "run_timestamp",
     "measurement_timestamp",
     "engine",
+    "hardware_id",
+    "cpu_model",
     "model",
     "fa",
     "model_load_time_ms",
@@ -70,6 +73,8 @@ MODEL_INFO_FIELDS = [
     "run_timestamp",
     "measurement_timestamp",
     "engine",
+    "hardware_id",
+    "cpu_model",
     "model",
     "model_sha256",
     "vocab_size",
@@ -92,34 +97,14 @@ MODEL_INFO_FIELDS = [
     "v_alloc_mb"
 ]
 
-HARDWARE_INFO_FIELDS = [
-    "run_id",
-    "run_timestamp",
-    "hostname",
-    "os_name",
-    "os_version",
-    "kernel_version",
-    "python_version",
-    "cpu_model",
-    "cpu_arch",
-    "cpu_cores_physical",
-    "cpu_cores_logical",
-    "cpu_features",
-    "cpu_midr_el1",
-    "cpu_sve_vector_length_bits",
-    "total_ram_mb",
-    "total_swap_mb",
-    "l1d_cache_kb",
-    "l1i_cache_kb",
-    "l2_cache_kb",
-    "l3_cache_kb"
-]
 
 PERPLEXITY_FIELDS = [
     "run_id",
     "run_timestamp",
     "measurement_timestamp",
     "engine",
+    "hardware_id",
+    "cpu_model",
     "model",
     "corpus_label",
     "corpus_token_count",
@@ -134,6 +119,8 @@ THREAD_FIELDS = [
     "run_timestamp",
     "measurement_timestamp",
     "engine",
+    "hardware_id",
+    "cpu_model",
     "model",
     "thread_scaling_tokens",
     "threads",
@@ -152,6 +139,8 @@ SAMPLES_FIELDS = [
     "run_timestamp",
     "monotonic_timestamp_ns",
     "engine",
+    "hardware_id",
+    "cpu_model",
     "model",
     "prompt_label",
     "token_count",
@@ -258,8 +247,8 @@ def get_model_info(llm: Llama) -> dict:
 
 def resolve_thread_count(value: int | str) -> int:
 
-    if value == "auto": 
-        return os.cpu_count() or 1
+    if value == "all": 
+        return performance_core_count()
     
     return int(value)
 
@@ -284,13 +273,14 @@ def append_row(csv_path: Path, csv_fields: list[str], row_values: dict) -> None:
 
 def snapshot_manifests(engines: list[EngineConfig]) -> None:
 
-    engine_manifests_dir = run_folder / "engine_manifests"
-    engine_manifests_dir.mkdir(parents=True, exist_ok=True)
-
+    manifests = {}
     for engine in engines:
         src = engines_dir / engine.name / "manifest.json"
-        dst = engine_manifests_dir / f"{engine.name}_manifest.json"
-        shutil.copy2(src, dst)
+        manifests[engine.name] = json.loads(src.read_text())
+
+    path = run_folder / "manifests" / "engines.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifests, indent=2))
 
 
 def read_prompt_file(prompt_name: str) -> str | None:
@@ -455,8 +445,8 @@ def get_thread_list(setting: list[int] | str | bool) -> list[int]:
     if setting is False:
         return []
 
-    if setting == "auto":
-        max_threads = os.cpu_count() or 1
+    if setting == "all":
+        max_threads = performance_core_count()
         threads = []
         t = 1
         while t < max_threads:
@@ -471,7 +461,7 @@ def get_thread_list(setting: list[int] | str | bool) -> list[int]:
 
     raise ValueError(
         f"\n> Invalid thread_scaling value: {setting!r}"
-        f"\n-> Must be 'auto', a list of ints (e.g. [1, 2, 4, 8]), or false."
+        f"\n-> Must be 'all', a list of ints (e.g. [1, 2, 4, 8]), or false."
     )
 
 
@@ -525,6 +515,8 @@ def record_performance(engine: EngineConfig, model: ModelConfig, runtime: Runtim
         "run_timestamp": run_timestamp,
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine.name,
+        "hardware_id": hardware_id,
+        "cpu_model": cpu_model,
         "model": model.name,
         "fa": bool(model.fa),
         "model_load_time_ms": model_load_time,
@@ -606,6 +598,8 @@ def record_perplexity(engine: EngineConfig, model: ModelConfig, corpus: CorpusCo
         "run_timestamp": run_timestamp,
         "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
         "engine": engine.name,
+        "hardware_id": hardware_id,
+        "cpu_model": cpu_model,
         "model": model.name,
         "corpus_label": corpus.name,
         "corpus_token_count": perplexity["corpus_token_count"],
@@ -626,6 +620,8 @@ def record_thread_scaling(engine: EngineConfig, model: ModelConfig, token_count:
             "run_timestamp": run_timestamp,
             "measurement_timestamp": run_time().strftime("%Y-%m-%dT%H:%M:%S"),
             "engine": engine.name,
+            "hardware_id": hardware_id,
+            "cpu_model": cpu_model,
             "model": model.name,
             "thread_scaling_tokens": token_count,
             "threads": threads,

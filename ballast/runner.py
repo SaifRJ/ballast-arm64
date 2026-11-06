@@ -9,7 +9,7 @@ from ballast.sampler import ResourceSampler
 import ballast.benchmark as bm
 import ballast.install as inst
 
-def spawn_engine_subprocess(engine: EngineConfig) -> None:
+def spawn_engine_subprocess(engine: EngineConfig, hardware: dict) -> None:
 
     # Spawn a fresh Python process to benchmark one engine.
     
@@ -20,6 +20,8 @@ def spawn_engine_subprocess(engine: EngineConfig) -> None:
     env["BALLAST_ENGINE_NAME"] = engine.name
     env["BALLAST_RUN_ID"] = run_id
     env["BALLAST_RUN_TIMESTAMP"] = run_timestamp
+    env["BALLAST_HARDWARE_ID"] = hardware["hardware_id"]
+    env["BALLAST_CPU_MODEL"] = hardware["cpu_model"] or ""
     subprocess.run([sys.executable, "-m", "ballast"], env=env, check=True)
 
 
@@ -54,7 +56,7 @@ def run_engine_benchmark(engine_name: str) -> None:
 
             # Return KV-cache allocation per model
             kv_alloc = bm.compute_kv_alloc(model_info, model)
-            
+
         else: kv_alloc = None
 
         if Metric.THREAD_SCALING in metrics_yaml.enabled:
