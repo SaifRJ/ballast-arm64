@@ -6,6 +6,7 @@ import csv
 import os
 import logging
 from pathlib import Path
+from ballast.config import hardware_id, cpu_model
 
 # Poll process memory and CPU at a configured ms interval
 # Uses two different modes: 
@@ -34,6 +35,8 @@ class ResourceSampler:
         self.run_id = run_id
         self.run_timestamp = run_timestamp
         self.engine_name = engine_name
+        self.hardware_id = hardware_id
+        self.cpu_model = cpu_model
         self.model_name = model_name
         self.prompt = prompt
         self.repeat = repeat
@@ -93,6 +96,8 @@ class ResourceSampler:
                     self.run_timestamp, 
                     ts,
                     self.engine_name, 
+                    self.hardware_id,
+                    self.cpu_model,
                     self.model_name, 
                     self.prompt, 
                     self.token_count,

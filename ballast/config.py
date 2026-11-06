@@ -21,6 +21,8 @@ models_dir = repo_root / "models"
 run_timestamp = os.environ.get("BALLAST_RUN_TIMESTAMP") or (run_time()).strftime("%Y-%m-%d_%H-%M")
 run_id = os.environ.get("BALLAST_RUN_ID") or str(uuid.uuid4())
 run_folder = results_dir / f"Benchmark_{run_timestamp}"
+hardware_id = os.environ.get("BALLAST_HARDWARE_ID")
+cpu_model = os.environ.get("BALLAST_CPU_MODEL")
 
 REQUIRED_BINARIES = ["llama-perplexity"]
 

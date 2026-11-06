@@ -1,9 +1,9 @@
-import os
-
-from ballast.config import load_config, init_run, run_timestamp
+from ballast.config import load_config, init_run, run_timestamp, run_folder
 import ballast.benchmark as bm
 import ballast.install as inst
 from ballast.runner import spawn_engine_subprocess
+import ballast.hardware as hw
+import os
 
 # This module controls top-level code orchestration for the entire pipeline. 
 # No functions are defined here.
@@ -41,13 +41,12 @@ def main():
     # Copy generated engine manifests
     bm.snapshot_manifests(engines)
 
-    # snapshot the host hardware details
-    # hardware_info = bm.read_hardware_fingerprint()
-    # bm.record_hardware_info(outputs["hardware_info"], hardware_info, run_id, run_timestamp)
+    # Compose and save host hardware and system details
+    hardware = hw.write_hardware_manifest(run_folder / "manifests" / "hardware.json")
 
     for engine in engines:
 
-        spawn_engine_subprocess(engine)
+        spawn_engine_subprocess(engine, hardware)
                     
     # group by (config, model, prompt), mean/median across repeats
     # bm.compute_summary(run_timestamp)

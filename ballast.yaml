@@ -44,8 +44,8 @@ corpora:
     ctx: 512 # Specify the context size to use for perplexity measurement. The default is 512 tokens.
 
 runtime:
-  n_threads: auto # Specify how many threads to use (via os.cpu_count) at inference time. If set to auto, will use the maximum number of threads available. 
-  n_threads_batch: auto # Threads for prefill/prompt processing. If set to auto, will use the same value as n_threads. Set independently for heterogeneous CPUs (P+E cores).
+  n_threads: auto # Specify how many threads to use at inference time. If set to "all", will use the maximum number of threads available.
+  n_threads_batch: auto # Threads for prefill/prompt processing. If set to "all", will use the same value as n_threads. Set independently for heterogeneous CPUs (P+E cores).
 
 pipeline:
   mode: snapshot # snapshot / sampled
@@ -54,10 +54,10 @@ pipeline:
   sample_interval_ms: 100 # If sampled mode is used, specify how often Ballast should sample the model's output (in milliseconds)
   repeats: 1 # How many times to repeat each prompt for each model. Allows for standard deviation to be calculated.
   warmup: 1 # Specify the number of warmup iterations before each measurement occurs.
-  prompts: [short, medium, long] # Specify which prompts to use for the benchmark. The prompt file names must match the names specified here. If set to 'all', all files in the prompts/ directory will be used.
-  thread_scaling: [1, 2, 4, 8] # Set the number of threads to use for thread scaling throughput measurements (e.g. [1, 2, 4, 8, 16]). If set to 'auto', will measure throughput for 1, 2, 4, 8, and 16 threads.
+  prompts: [short, medium, long] # Specify which prompts to use for the benchmark. The prompt file names must match the names specified here. If set to "all", all files in the prompts/ directory will be used.
+  thread_scaling: [1, 2, 4, 8] # Set the number of threads to use for thread scaling throughput measurements (e.g. [1, 2, 4, 8, 16]). If set to "all", will measure throughput for 1, 2, 4, 8, and 16 threads.
   thread_scaling_prompt_tokens: 512 # Length of synthetic prompt used for thread scaling measurement. Matches llama-bench's -p 512 default.
-  parallel_builds: 1 # Specify how many engine builds to run in parallel. If set to 1, will build one engine/model at a time. If set to auto, will build as many as possible based on the number of CPU cores available.
+  parallel_builds: 1 # Specify how many engine builds to run in parallel. If set to 1, will build one engine/model at a time. If set to "all", will build as many as possible based on the number of CPU cores available.
   output_dir: results # Specify where Ballast should deposit output files. All outputs will be in the results/ folder by default.
   log_level: info # debug / info / error / warning
 
