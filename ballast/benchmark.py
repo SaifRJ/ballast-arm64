@@ -1,3 +1,4 @@
+from ballast.platform_adapter import performance_core_count
 from ballast.schema import (EngineConfig, Metric, MetricSet, ModelConfig, CorpusConfig, RuntimeConfig, CacheType)
 from ballast.config import engines_dir, prompts_dir, run_folder, BYTES_PER_ELEM, KV_TYPE_MAP, run_time
 from typing import Callable, Any
@@ -92,28 +93,6 @@ MODEL_INFO_FIELDS = [
     "v_alloc_mb"
 ]
 
-HARDWARE_INFO_FIELDS = [
-    "run_id",
-    "run_timestamp",
-    "hostname",
-    "os_name",
-    "os_version",
-    "kernel_version",
-    "python_version",
-    "cpu_model",
-    "cpu_arch",
-    "cpu_cores_physical",
-    "cpu_cores_logical",
-    "cpu_features",
-    "cpu_midr_el1",
-    "cpu_sve_vector_length_bits",
-    "total_ram_mb",
-    "total_swap_mb",
-    "l1d_cache_kb",
-    "l1i_cache_kb",
-    "l2_cache_kb",
-    "l3_cache_kb"
-]
 
 PERPLEXITY_FIELDS = [
     "run_id",
@@ -258,8 +237,8 @@ def get_model_info(llm: Llama) -> dict:
 
 def resolve_thread_count(value: int | str) -> int:
 
-    if value == "auto": 
-        return os.cpu_count() or 1
+    if value == "all": 
+        return performance_core_count()
     
     return int(value)
 
@@ -455,8 +434,8 @@ def get_thread_list(setting: list[int] | str | bool) -> list[int]:
     if setting is False:
         return []
 
-    if setting == "auto":
-        max_threads = os.cpu_count() or 1
+    if setting == "all":
+        max_threads = performance_core_count()
         threads = []
         t = 1
         while t < max_threads:
@@ -471,7 +450,7 @@ def get_thread_list(setting: list[int] | str | bool) -> list[int]:
 
     raise ValueError(
         f"\n> Invalid thread_scaling value: {setting!r}"
-        f"\n-> Must be 'auto', a list of ints (e.g. [1, 2, 4, 8]), or false."
+        f"\n-> Must be 'all', a list of ints (e.g. [1, 2, 4, 8]), or false."
     )
 
 
